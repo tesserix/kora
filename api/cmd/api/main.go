@@ -40,6 +40,7 @@ import (
 	"github.com/tesserix/kora/api/internal/foodlog"
 	"github.com/tesserix/kora/api/internal/groups"
 	"github.com/tesserix/kora/api/internal/labelocr"
+	"github.com/tesserix/kora/api/internal/mail"
 	"github.com/tesserix/kora/api/internal/metrics"
 	"github.com/tesserix/kora/api/internal/notifications"
 	"github.com/tesserix/kora/api/internal/nutrition"
@@ -94,6 +95,13 @@ func main() {
 	}
 	if cfg.ZitadelLoginClientToken == "" {
 		logger.Warn("in-app sign-in disabled (no ZITADEL_LOGIN_CLIENT_TOKEN); /v1/auth/* answers 503")
+	}
+	// A typed nil *mail.Resend in the interface would read as configured.
+	var codeMailer signin.Mailer
+	if m := mail.NewResend(cfg.ResendAPIKey, cfg.MailFrom); m != nil {
+		codeMailer = m
+	} else {
+		logger.Warn("sign-in code emails sent by Zitadel (no RESEND_API_KEY)")
 	}
 
 	resolveHandler, aiProvider, resolveCache, bodyCompositionCache := buildResolveHandler(context.Background(), cfg, db, logger)
@@ -276,6 +284,7 @@ func main() {
 				ClientIDs: map[string]string{"ios": cfg.ZitadelClientIDIOS, "android": cfg.ZitadelClientIDAndroid},
 				IDPs:      map[string]string{"google": cfg.ZitadelGoogleIDPID, "apple": cfg.ZitadelAppleIDPID},
 				Deleter:   identityDeleter,
+				Mailer:    codeMailer,
 			}),
 			Stripe: billing.StripeConfig{
 				SecretKey:     cfg.StripeSecretKey,

@@ -33,7 +33,11 @@ type Config struct {
 	ZitadelClientIDAndroid string
 	ZitadelGoogleIDPID     string
 	ZitadelAppleIDPID      string
-	GeminiAPIKey           string
+	// ResendAPIKey sends sign-in code emails as Kora rather than through
+	// Zitadel's shared template. Empty leaves Zitadel sending them.
+	ResendAPIKey string
+	MailFrom     string
+	GeminiAPIKey string
 	// VertexProject, when set, switches the resolve engine from the Gemini API
 	// (personal API key, free-tier quotas) to Vertex AI authenticated by the
 	// workload's own service account. See providers.NewVertexProvider.
@@ -180,6 +184,8 @@ func Load() (Config, error) {
 		ZitadelClientIDAndroid:   strings.TrimSpace(getenv("ZITADEL_CLIENT_ID_ANDROID", "394926084329572397")),
 		ZitadelGoogleIDPID:       strings.TrimSpace(getenv("ZITADEL_GOOGLE_IDP_ID", "386381087862948767")),
 		ZitadelAppleIDPID:        strings.TrimSpace(getenv("ZITADEL_APPLE_IDP_ID", "389173155337339395")),
+		ResendAPIKey:             strings.TrimSpace(os.Getenv("RESEND_API_KEY")),
+		MailFrom:                 strings.TrimSpace(getenv("MAIL_FROM", "Kora <no-reply@tesserix.app>")),
 		GeminiAPIKey:             os.Getenv("GEMINI_API_KEY"),
 		VertexProject:            os.Getenv("VERTEX_PROJECT"),
 		VertexLocation:           getenv("VERTEX_LOCATION", "global"),

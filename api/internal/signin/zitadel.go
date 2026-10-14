@@ -304,6 +304,7 @@ type user struct {
 	id            string
 	email         string
 	emailVerified bool
+	givenName     string
 }
 
 // usersByEmail lists the users in Kora's org whose email matches, ignoring
@@ -325,6 +326,9 @@ func (z *zitadel) usersByEmail(ctx context.Context, email string) ([]user, error
 		Result []struct {
 			UserID string `json:"userId"`
 			Human  *struct {
+				Profile struct {
+					GivenName string `json:"givenName"`
+				} `json:"profile"`
 				Email struct {
 					Email      string `json:"email"`
 					IsVerified bool   `json:"isVerified"`
@@ -342,7 +346,7 @@ func (z *zitadel) usersByEmail(ctx context.Context, email string) ([]user, error
 		if r.Human == nil || !strings.EqualFold(r.Human.Email.Email, email) {
 			continue
 		}
-		out = append(out, user{id: r.UserID, email: r.Human.Email.Email, emailVerified: r.Human.Email.IsVerified})
+		out = append(out, user{id: r.UserID, email: r.Human.Email.Email, emailVerified: r.Human.Email.IsVerified, givenName: r.Human.Profile.GivenName})
 	}
 	return out, nil
 }
@@ -385,21 +389,46 @@ type profile struct {
 	displayName string
 }
 
-// createPasswordUser registers a human with an unverified email and asks
-// Zitadel to mail the verification code. Weak passwords and taken emails come
-// back as their own errors so the sign-up screen can say which.
-func (z *zitadel) createPasswordUser(ctx context.Context, p profile, email, password string) (string, error) {
+// createPasswordUser registers a human with an unverified email. With
+// returnCode the verification code comes back for Kora to mail; without it
+// Zitadel mails it. Weak passwords and taken emails come back as their own
+// errors so the sign-up screen can say which.
+func (z *zitadel) createPasswordUser(ctx context.Context, p profile, email, password string, returnCode bool) (id, code string, err error) {
 	self, err := z.loginClient(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+	emailBody := codeDelivery(returnCode)
+	emailBody["email"] = email
 	body := map[string]any{
 		"organization": map[string]any{"orgId": self.orgID},
 		"profile":      profileBody(p),
-		"email":        map[string]any{"email": email, "sendCode": map[string]any{}},
+		"email":        emailBody,
 		"password":     map[string]any{"password": password, "changeRequired": false},
 	}
-	return z.createUser(ctx, body)
+	var wire struct {
+		UserID    string `json:"userId"`
+		EmailCode string `json:"emailCode"`
+	}
+	if err := z.createUser(ctx, body, &wire); err != nil {
+		return "", "", err
+	}
+	if wire.UserID == "" {
+		return "", "", errNoUserID()
+	}
+	if returnCode && wire.EmailCode == "" {
+		return "", "", fmt.Errorf("signin: user created without a code: %w", errUnavailable)
+	}
+	return wire.UserID, wire.EmailCode, nil
+}
+
+// codeDelivery is the request fragment choosing who sends a code: returnCode
+// hands it to kora-api, sendCode has Zitadel mail it.
+func codeDelivery(returnCode bool) map[string]any {
+	if returnCode {
+		return map[string]any{"returnCode": map[string]any{}}
+	}
+	return map[string]any{"sendCode": map[string]any{}}
 }
 
 type federatedIdentity struct {
@@ -427,24 +456,32 @@ func (z *zitadel) createFederatedUser(ctx context.Context, p profile, identity f
 		"email":        map[string]any{"email": identity.email, "isVerified": true},
 		"idpLinks":     []any{idpLinkBody(identity)},
 	}
-	return z.createUser(ctx, body)
-}
-
-func (z *zitadel) createUser(ctx context.Context, body map[string]any) (string, error) {
 	var wire struct {
 		UserID string `json:"userId"`
 	}
-	if err := z.do(ctx, http.MethodPost, "/v2/users/human", body, &wire); err != nil {
-		var st *zitadelStatus
-		if errors.As(err, &st) && st.id == weakPasswordErrorID {
-			return "", errors.Join(errWeakPassword, err)
-		}
+	if err := z.createUser(ctx, body, &wire); err != nil {
 		return "", err
 	}
 	if wire.UserID == "" {
-		return "", fmt.Errorf("signin: user created without an id: %w", errUnavailable)
+		return "", errNoUserID()
 	}
 	return wire.UserID, nil
+}
+
+// createUser posts body to /v2/users/human, decoding the answer into wire.
+func (z *zitadel) createUser(ctx context.Context, body map[string]any, wire any) error {
+	if err := z.do(ctx, http.MethodPost, "/v2/users/human", body, wire); err != nil {
+		var st *zitadelStatus
+		if errors.As(err, &st) && st.id == weakPasswordErrorID {
+			return errors.Join(errWeakPassword, err)
+		}
+		return err
+	}
+	return nil
+}
+
+func errNoUserID() error {
+	return fmt.Errorf("signin: user created without an id: %w", errUnavailable)
 }
 
 func profileBody(p profile) map[string]any {
@@ -473,16 +510,32 @@ func (z *zitadel) verifyEmail(ctx context.Context, userID, code string) error {
 	return err
 }
 
-// resendEmailCode mails userID a fresh verification code, replacing the last.
-func (z *zitadel) resendEmailCode(ctx context.Context, userID string) error {
-	return z.do(ctx, http.MethodPost, "/v2/users/"+url.PathEscape(userID)+"/email/resend",
-		map[string]any{"sendCode": map[string]any{}}, nil)
+// resendEmailCode issues userID a fresh verification code, replacing the
+// last: returned with returnCode, mailed by Zitadel without.
+func (z *zitadel) resendEmailCode(ctx context.Context, userID string, returnCode bool) (string, error) {
+	return z.issueCode(ctx, "/v2/users/"+url.PathEscape(userID)+"/email/resend", codeDelivery(returnCode), returnCode)
 }
 
-// requestPasswordReset mails userID a password reset code.
-func (z *zitadel) requestPasswordReset(ctx context.Context, userID string) error {
-	return z.do(ctx, http.MethodPost, "/v2/users/"+url.PathEscape(userID)+"/password_reset",
-		map[string]any{"sendLink": map[string]any{"notificationType": "NOTIFICATION_TYPE_Email"}}, nil)
+// requestPasswordReset issues userID a password reset code, the same way.
+func (z *zitadel) requestPasswordReset(ctx context.Context, userID string, returnCode bool) (string, error) {
+	body := map[string]any{"sendLink": map[string]any{"notificationType": "NOTIFICATION_TYPE_Email"}}
+	if returnCode {
+		body = codeDelivery(true)
+	}
+	return z.issueCode(ctx, "/v2/users/"+url.PathEscape(userID)+"/password_reset", body, returnCode)
+}
+
+func (z *zitadel) issueCode(ctx context.Context, path string, body map[string]any, returnCode bool) (string, error) {
+	var wire struct {
+		VerificationCode string `json:"verificationCode"`
+	}
+	if err := z.do(ctx, http.MethodPost, path, body, &wire); err != nil {
+		return "", err
+	}
+	if returnCode && wire.VerificationCode == "" {
+		return "", fmt.Errorf("signin: %s returned no code: %w", logPath(path), errUnavailable)
+	}
+	return wire.VerificationCode, nil
 }
 
 // setPassword replaces userID's password, authorised by the emailed reset code.
