@@ -26,7 +26,9 @@ provider bodies, prompts, credentials or transport error details.
 Requests are limited to 16,000 serialized bytes and 16 questions, with at most
 255 options/levels. This deliberately stays below the vendor's token limits
 without estimating unknown tokenization. Responses are capped at 64,000 bytes.
-Every call has a 1.5-second deadline and one attempt. A `jev.decide` span records
+Every API decision call has a four-second deadline and one attempt. The gateway
+request budget is three seconds, leaving time for authentication and transport.
+A shorter caller deadline still wins. A `jev.decide` span records
 the resolved model and token usage, never state or answers.
 
 ## Initial validation

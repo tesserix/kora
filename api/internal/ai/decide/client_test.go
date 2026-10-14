@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -178,4 +180,51 @@ func TestEveryCallHasABoundedDeadline(t *testing.T) {
 	require.NoError(t, err)
 	_, err = client.Decide(auth.WithVerifiedToken(t.Context(), "verified"), json.RawMessage(`{}`), map[string]Question{"known": Noul{"Known?"}})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+type delayedDecisionTransport struct{ delay time.Duration }
+
+func (d delayedDecisionTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	timer := time.NewTimer(d.delay)
+	defer timer.Stop()
+	select {
+	case <-r.Context().Done():
+		return nil, r.Context().Err()
+	case <-timer.C:
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"model":"jev-1.13.0","answers":{"next":{"type":"choice","choice":"ask","confidence":1,"probabilities":{"ask":1,"calculate":0}}},"usage":{"input_tokens":10,"output_tokens":2}}`))}, nil
+	}
+}
+
+func TestDecideAllowsGatewayAndProviderToCompleteAfter1500ms(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		client, err := NewClient("http://127.0.0.1", "test-key", &http.Client{Transport: delayedDecisionTransport{2 * time.Second}})
+		require.NoError(t, err)
+		result, err := client.Decide(auth.WithVerifiedToken(t.Context(), "verified"), json.RawMessage(`{}`), map[string]Question{"next": Choice{"Next?", map[string]string{"ask": "Missing", "calculate": "Known"}}})
+		require.NoError(t, err)
+		require.Equal(t, "ask", result.Answers["next"].Choice)
+	})
+}
+
+func TestDecideRespectsCallerDeadlineAndHardLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		parentBudget time.Duration
+		want         time.Duration
+	}{
+		{"caller deadline", 500 * time.Millisecond, 500 * time.Millisecond},
+		{"decision limit", 10 * time.Second, 4 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				client, err := NewClient("http://127.0.0.1", "test-key", &http.Client{Transport: delayedDecisionTransport{5 * time.Second}})
+				require.NoError(t, err)
+				ctx, cancel := context.WithTimeout(auth.WithVerifiedToken(t.Context(), "verified"), tc.parentBudget)
+				defer cancel()
+				started := time.Now()
+				_, err = client.Decide(ctx, json.RawMessage(`{}`), map[string]Question{"next": Choice{"Next?", map[string]string{"ask": "Missing", "calculate": "Known"}}})
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+				require.Equal(t, tc.want, time.Since(started))
+			})
+		})
+	}
 }
