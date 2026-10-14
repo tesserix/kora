@@ -23,7 +23,17 @@ type Config struct {
 	// ZitadelDeleterToken is a machine user's PAT, used only to delete the
 	// caller's own Zitadel user on account deletion.
 	ZitadelDeleterToken string
-	GeminiAPIKey        string
+	// ZitadelLoginClientToken is kora-login-client's PAT, which drives the
+	// Session API behind the app's own sign-in screens. Empty leaves
+	// /v1/auth/* answering 503.
+	ZitadelLoginClientToken string
+	// The native OIDC clients the app's sign-in codes are issued to, and the
+	// Google and Apple IdPs its buttons may use. Defaults are production's.
+	ZitadelClientIDIOS     string
+	ZitadelClientIDAndroid string
+	ZitadelGoogleIDPID     string
+	ZitadelAppleIDPID      string
+	GeminiAPIKey           string
 	// VertexProject, when set, switches the resolve engine from the Gemini API
 	// (personal API key, free-tier quotas) to Vertex AI authenticated by the
 	// workload's own service account. See providers.NewVertexProvider.
@@ -165,6 +175,11 @@ func Load() (Config, error) {
 		ZitadelIssuer:            strings.TrimSpace(getenv("ZITADEL_ISSUER", "https://auth.tesserix.app")),
 		ZitadelProjectID:         strings.TrimSpace(os.Getenv("ZITADEL_PROJECT_ID")),
 		ZitadelDeleterToken:      strings.TrimSpace(os.Getenv("ZITADEL_DELETER_TOKEN")),
+		ZitadelLoginClientToken:  strings.TrimSpace(os.Getenv("ZITADEL_LOGIN_CLIENT_TOKEN")),
+		ZitadelClientIDIOS:       strings.TrimSpace(getenv("ZITADEL_CLIENT_ID_IOS", "394926081745881133")),
+		ZitadelClientIDAndroid:   strings.TrimSpace(getenv("ZITADEL_CLIENT_ID_ANDROID", "394926084329572397")),
+		ZitadelGoogleIDPID:       strings.TrimSpace(getenv("ZITADEL_GOOGLE_IDP_ID", "386381087862948767")),
+		ZitadelAppleIDPID:        strings.TrimSpace(getenv("ZITADEL_APPLE_IDP_ID", "389173155337339395")),
 		GeminiAPIKey:             os.Getenv("GEMINI_API_KEY"),
 		VertexProject:            os.Getenv("VERTEX_PROJECT"),
 		VertexLocation:           getenv("VERTEX_LOCATION", "global"),
