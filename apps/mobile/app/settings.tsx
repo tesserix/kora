@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { router } from "expo-router";
 import { safeBack } from "@/lib/safeBack";
 import { AppText } from "@/components/Text";
 import { ScreenHeader } from "@/components/ScreenHeader";
@@ -102,6 +103,18 @@ export default function SettingsScreen() {
             </GlassPanel>
             <AppText style={{ fontSize: 13, color: instrument.mut, marginLeft: spacing.md, marginTop: spacing.xs }}>
               System follows your device setting.
+            </AppText>
+          </View>
+
+          <View>
+            <AppText style={[engravedStyle(instrument), { marginLeft: spacing.md, marginBottom: spacing.xs }]}>
+              Security
+            </AppText>
+            <GroupedSection>
+              <Row title="Two-step verification" chevron onPress={() => router.push("/security")} />
+            </GroupedSection>
+            <AppText style={{ fontSize: 13, color: instrument.mut, marginLeft: spacing.md, marginTop: spacing.xs }}>
+              Ask for a code from an authenticator app when you sign in.
             </AppText>
           </View>
 
