@@ -138,6 +138,44 @@ const ROUND_BUTTON = {
   justifyContent: "center" as const,
 };
 
+/** Which resolve the analyzing row is waiting on. */
+export type AnalyzingKind = "photo" | "voice" | "barcode" | "message";
+
+const ANALYZING_COPY: Record<AnalyzingKind, string> = {
+  photo: "Otto is looking at your photo…",
+  voice: "Otto is listening…",
+  barcode: "Otto is looking up that barcode…",
+  message: "Otto is analyzing…",
+};
+
+// Past these, the row says the wait is real instead of repeating the same
+// line. It tracks time, not server progress, so it names no step it can't see.
+const ANALYZING_SLOW_MS = 12_000;
+const ANALYZING_VERY_SLOW_MS = 30_000;
+
+export function analyzingCopy(kind: AnalyzingKind, elapsedMs: number): string {
+  if (elapsedMs >= ANALYZING_VERY_SLOW_MS) return "This is taking longer than usual. You can keep waiting or cancel.";
+  if (elapsedMs >= ANALYZING_SLOW_MS) {
+    return kind === "photo" ? "Still looking. Mixed dishes take a little longer to check." : "Still working on it…";
+  }
+  return ANALYZING_COPY[kind];
+}
+
+// Mounted only while a resolve is in flight, so its clock restarts each time.
+function AnalyzingStatus({ kind }: { kind: AnalyzingKind }) {
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const timer = setInterval(() => setElapsedMs(Date.now() - started), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <AppText testID="capture-analyzing-status" accessibilityLiveRegion="polite" style={{ color: T.mut, fontSize: 13, flexShrink: 1 }}>
+      {analyzingCopy(kind, elapsedMs)}
+    </AppText>
+  );
+}
+
 // Rotating "loader" icon for the analyzing stage. Honors reduce-motion by
 // freezing at 0deg instead of looping the rotation — mirrors the mockup's
 // `tsx-spin` keyframes and Waveform's reduce-motion pattern.
@@ -463,7 +501,7 @@ function IdleAffordance({
       <View
         testID="capture-idle-scan"
         style={{
-          height: 200,
+          paddingVertical: 16,
           borderRadius: 20,
           backgroundColor: T.glass,
           borderWidth: 1,
@@ -472,10 +510,14 @@ function IdleAffordance({
           justifyContent: "center",
         }}
       >
+        {/* Wide and tall on purpose. A small window made people hold the
+            phone close to fill it, nearer than the main camera can focus, so
+            the barcode stayed blurred and was never read. */}
         <View
           style={{
-            width: 200,
-            height: 110,
+            alignSelf: "stretch",
+            marginHorizontal: 16,
+            height: 200,
             borderRadius: 12,
             borderWidth: 2,
             borderColor: T.glassBorder,
@@ -517,6 +559,11 @@ function IdleAffordance({
         <AppText style={{ marginTop: 12, color: T.mut, fontSize: 13, fontWeight: "600" }}>
           Point at a barcode
         </AppText>
+        {cameraPermissionGranted ? (
+          <AppText style={{ marginTop: 4, color: T.mut, fontSize: 12 }}>
+            {"Hold the phone about 20 cm away. The barcode doesn't need to fill the frame."}
+          </AppText>
+        ) : null}
       </View>
     );
   }
@@ -538,6 +585,8 @@ interface CaptureBodyProps {
   mode: CaptureMode;
   onModeChange: (mode: CaptureMode) => void;
   stage: CaptureStage;
+  /** What the analyzing row says it is waiting on. */
+  analyzingKind?: AnalyzingKind;
   resolution: Resolution | null;
   errorMsg: string | null;
   /**
@@ -603,6 +652,7 @@ export function CaptureBody({
   mode,
   onModeChange,
   stage,
+  analyzingKind = "message",
   resolution,
   errorMsg,
   transcript,
@@ -760,9 +810,9 @@ export function CaptureBody({
               paddingLeft: 40,
             }}
           >
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexShrink: 1 }}>
               <AnalyzingSpinner />
-              <AppText style={{ color: T.mut, fontSize: 13 }}>Otto is analyzing…</AppText>
+              <AnalyzingStatus kind={analyzingKind} />
             </View>
             {/* Secondary control — a resolve is bounded by REQUEST_TIMEOUT_MS
                 either way (api.ts), so Cancel is purely for the user who
@@ -1348,6 +1398,14 @@ export default function CaptureScreen() {
       resolveControllerRef.current?.abort();
     };
   }, []);
+
+  const analyzingKind: AnalyzingKind = resolvePhoto.isPending
+    ? "photo"
+    : resolveVoice.isPending
+      ? "voice"
+      : resolveBarcode.isPending
+        ? "barcode"
+        : "message";
 
   const displayStage: CaptureStage =
     !cancelledResolve &&
@@ -2065,6 +2123,7 @@ export default function CaptureScreen() {
         mode={mode}
         onModeChange={handleModeChange}
         stage={displayStage}
+        analyzingKind={analyzingKind}
         resolution={effectiveResolution}
         errorMsg={errorMsg}
         transcript={transcript}
