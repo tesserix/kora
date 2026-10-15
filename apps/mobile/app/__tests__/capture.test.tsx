@@ -24,7 +24,7 @@ import { StyleSheet } from "react-native";
 import * as Reanimated from "react-native-reanimated";
 import { INSTRUMENT_DARK_FIXED } from "@/theme";
 
-import CaptureScreen, { CaptureBody, COMPOSER_BUTTON } from "../capture";
+import CaptureScreen, { analyzingCopy, CaptureBody, COMPOSER_BUTTON } from "../capture";
 
 const cachedBarcodeFood: FoodItem = {
   id: "f-bar",
@@ -499,6 +499,32 @@ test("analyzing stage shows the spinner", async () => {
     <CaptureBody {...noopBodyProps} stage="analyzing" resolution={null} />,
   );
   expect(getByTestId("capture-analyzing-spinner")).toBeTruthy();
+});
+
+test("analyzing says what Otto is looking at, then that the wait is real", async () => {
+  jest.useFakeTimers();
+  try {
+    const screen = await render(
+      <CaptureBody {...noopBodyProps} stage="analyzing" analyzingKind="photo" resolution={null} />,
+    );
+    expect(screen.getByTestId("capture-analyzing-status").props.children).toBe("Otto is looking at your photo…");
+    await act(async () => {
+      jest.advanceTimersByTime(13_000);
+    });
+    expect(screen.getByTestId("capture-analyzing-status").props.children).toBe(
+      "Still looking. Mixed dishes take a little longer to check.",
+    );
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("analyzingCopy names the modality, then only the wait", () => {
+  expect(analyzingCopy("barcode", 0)).toBe("Otto is looking up that barcode…");
+  expect(analyzingCopy("voice", 0)).toBe("Otto is listening…");
+  expect(analyzingCopy("message", 0)).toBe("Otto is analyzing…");
+  expect(analyzingCopy("voice", 12_000)).toBe("Still working on it…");
+  expect(analyzingCopy("photo", 30_000)).toBe("This is taking longer than usual. You can keep waiting or cancel.");
 });
 
 test("analyzing stage renders a Cancel control that calls onCancelResolve", async () => {

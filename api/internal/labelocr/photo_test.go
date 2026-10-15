@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,32 +25,43 @@ func (d *photoDecision) Decide(context.Context, json.RawMessage, map[string]deci
 	return decide.Result{Model: "jev-1.13.0", Answers: map[string]decide.Answer{"route": {Choice: d.choice}}}, d.err
 }
 
-type photoVision struct{ calls int }
+// photoVision answers at once, or with hold set, only once its context ends:
+// how a test sees that a vision call started alongside OCR was cancelled.
+type photoVision struct {
+	calls     int
+	hold      bool
+	cancelled bool
+}
 
-func (v *photoVision) ResolvePhoto(context.Context, uuid.UUID, []byte, string) (ai.Resolution, error) {
+func (v *photoVision) ResolvePhoto(ctx context.Context, _ uuid.UUID, _ []byte, _ string) (ai.Resolution, error) {
 	v.calls++
+	if v.hold {
+		<-ctx.Done()
+		v.cancelled = true
+		return ai.Resolution{}, ctx.Err()
+	}
 	return ai.Resolution{Tier: ai.TierAuto, Candidates: []ai.ResolvedCandidate{{PortionGrams: 240, Tier: ai.TierAuto}}}, nil
 }
 func TestPhotoRequiresJevEvenForReadableLabel(t *testing.T) {
 	reader := &stubReader{read: Read{Status: "completed", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 100, "per_100g.protein_g": 10, "per_100g.carbohydrate_g": 15, "per_100g.fat_g": 0})}}
 	decision := &photoDecision{err: errors.New("unavailable")}
-	vision := &photoVision{}
+	vision := &photoVision{hold: true}
 	service := NewPhotoResolver(reader, decision, nil, vision, &stubBudget{within: true})
 	_, err := service.ResolvePhoto(t.Context(), uuid.New(), []byte("photo"), "image/jpeg")
 	require.ErrorIs(t, err, ErrDecisionUnavailable)
 	require.Equal(t, 1, decision.calls)
-	require.Zero(t, vision.calls)
+	require.True(t, vision.cancelled, "the vision call started alongside OCR is cancelled, not used")
 }
 
 func TestPhotoReadableLabelSkipsVisionAndPreservesUnknownConsumption(t *testing.T) {
 	reader := &stubReader{read: Read{Status: "completed", JobID: "synthetic-job", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 100, "per_100g.protein_g": 10, "per_100g.carbohydrate_g": 15, "per_100g.fat_g": 0})}}
 	decision := &photoDecision{choice: "label"}
-	vision := &photoVision{}
+	vision := &photoVision{hold: true}
 	budget := &stubBudget{within: true}
 	res, err := NewPhotoResolver(reader, decision, nil, vision, budget).ResolvePhoto(t.Context(), uuid.New(), []byte("photo"), "image/jpeg")
 	require.NoError(t, err)
 	require.Equal(t, 1, decision.calls)
-	require.Zero(t, vision.calls)
+	require.True(t, vision.cancelled, "the vision call started alongside OCR is cancelled, not used")
 	require.Equal(t, ai.TierFollowUp, res.Tier)
 	require.Empty(t, res.Candidates)
 	require.Contains(t, res.FollowUpQuestion, "100.0 kcal per 100 g")
@@ -73,12 +85,12 @@ func TestPhotoMealPortionIsAlwaysAnEstimate(t *testing.T) {
 
 func TestPhotoJevCannotApproveMissingLabelEvidence(t *testing.T) {
 	decision := &photoDecision{choice: "label"}
-	vision := &photoVision{}
+	vision := &photoVision{hold: true}
 	res, err := NewPhotoResolver(&stubReader{err: ErrUnreadable}, decision, nil, vision, &stubBudget{within: true}).ResolvePhoto(t.Context(), uuid.New(), []byte("photo"), "image/jpeg")
 	require.NoError(t, err)
 	require.Empty(t, res.Candidates)
 	require.Equal(t, "retake", res.PhotoEvidence.Route)
-	require.Zero(t, vision.calls)
+	require.True(t, vision.cancelled, "the vision call started alongside OCR is cancelled, not used")
 }
 
 func TestPhotoQuotaStopsBeforeOCR(t *testing.T) {
@@ -106,11 +118,11 @@ func TestPhotoRoutesUncertainLabelToIndependentReview(t *testing.T) {
 	reader := &stubReader{read: Read{Status: "partial", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 100})}}
 	reviewer := &photoReviewer{read: Read{Status: "review_required", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 100, "per_100g.protein_g": 10, "per_100g.carbohydrate_g": 15, "per_100g.fat_g": 0})}}
 	decision := &photoDecision{choice: "review"}
-	vision := &photoVision{}
+	vision := &photoVision{hold: true}
 	res, err := NewPhotoResolver(reader, decision, reviewer, vision, &stubBudget{within: true}).ResolvePhoto(t.Context(), uuid.New(), []byte("photo"), "image/jpeg")
 	require.NoError(t, err)
 	require.Equal(t, 1, reviewer.calls)
-	require.Zero(t, vision.calls)
+	require.True(t, vision.cancelled, "the vision call started alongside OCR is cancelled, not used")
 	require.Contains(t, res.FollowUpQuestion, "unverified")
 	require.Empty(t, res.Candidates)
 	require.Equal(t, "partial", res.PhotoEvidence.OCRStatus)
@@ -120,7 +132,7 @@ func TestPhotoRoutesUncertainLabelToIndependentReview(t *testing.T) {
 func TestPhotoReviewDisagreementCannotBecomeCaloriesEaten(t *testing.T) {
 	reader := &stubReader{read: Read{Status: "partial", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 100})}}
 	reviewer := &photoReviewer{read: Read{Status: "completed", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 200, "per_100g.protein_g": 20, "per_100g.carbohydrate_g": 30, "per_100g.fat_g": 0})}}
-	res, err := NewPhotoResolver(reader, &photoDecision{choice: "review"}, reviewer, &photoVision{}, &stubBudget{within: true}).ResolvePhoto(t.Context(), uuid.New(), []byte("photo"), "image/jpeg")
+	res, err := NewPhotoResolver(reader, &photoDecision{choice: "review"}, reviewer, &photoVision{hold: true}, &stubBudget{within: true}).ResolvePhoto(t.Context(), uuid.New(), []byte("photo"), "image/jpeg")
 	require.NoError(t, err)
 	require.Empty(t, res.Candidates)
 	require.Empty(t, res.PhotoEvidence.Label)
@@ -164,10 +176,32 @@ func (r delayedPhotoReader) Read(ctx context.Context, _ []byte, _ string) (Read,
 }
 func TestPhotoWaitsForNormalOCRJobLatency(t *testing.T) {
 	reader := delayedPhotoReader{read: Read{Status: "completed", JobID: "synthetic-job", Fields: fields(t, map[string]any{"per_100g.energy_kcal": 100, "per_100g.protein_g": 10, "per_100g.carbohydrate_g": 15, "per_100g.fat_g": 0})}}
-	vision := &photoVision{}
+	vision := &photoVision{hold: true}
 	res, err := NewPhotoResolver(reader, &photoDecision{choice: "label"}, nil, vision, &stubBudget{within: true}).ResolvePhoto(t.Context(), uuid.New(), []byte("photo"), "image/jpeg")
 	require.NoError(t, err)
 	require.Equal(t, "label", res.PhotoEvidence.Route)
 	require.Equal(t, "synthetic-job", res.PhotoEvidence.OCRJobID)
-	require.Zero(t, vision.calls)
+	require.True(t, vision.cancelled, "the vision call started alongside OCR is cancelled, not used")
+}
+
+type slowVision struct{ delay time.Duration }
+
+func (v slowVision) ResolvePhoto(ctx context.Context, _ uuid.UUID, _ []byte, _ string) (ai.Resolution, error) {
+	select {
+	case <-ctx.Done():
+		return ai.Resolution{}, ctx.Err()
+	case <-time.After(v.delay):
+		return ai.Resolution{Tier: ai.TierConfirm, Candidates: []ai.ResolvedCandidate{{PortionGrams: 240, Tier: ai.TierConfirm}}}, nil
+	}
+}
+
+func TestPhotoVisionRunsWhileOCRReads(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		res, err := NewPhotoResolver(delayedPhotoReader{read: Read{Status: "completed"}}, &photoDecision{choice: "vision"}, nil, slowVision{delay: 5 * time.Second}, &stubBudget{within: true}).ResolvePhoto(t.Context(), uuid.New(), []byte("photo"), "image/jpeg")
+		require.NoError(t, err)
+		require.Equal(t, "vision", res.PhotoEvidence.Route)
+		require.Len(t, res.Candidates, 1)
+		require.Equal(t, 6*time.Second, time.Since(started), "vision's 5 s overlaps OCR's 6 s instead of following it")
+	})
 }

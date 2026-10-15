@@ -91,7 +91,7 @@ func TestPhotoAPIRequiresSuccessfulDecisionWithinRemainingBudget(t *testing.T) {
 				require.Equal(t, tc.wantStatus, response.Code, response.Body.String())
 				require.Len(t, budget.records, 2)
 				if tc.wantStatus != 200 {
-					require.Zero(t, vision.gotSize, "failed mandatory decisions must stop food vision")
+					require.NotContains(t, response.Body.String(), "Chicken salad", "a failed mandatory decision must not serve the vision result")
 					require.Contains(t, response.Body.String(), "ai_decision_unavailable")
 					return
 				}
