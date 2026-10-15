@@ -264,8 +264,8 @@ func TestSignInWithUnverifiedEmailResendsTheCodeOnlyAfterThePassword(t *testing.
 
 func TestSignInRefusesWhenASecondFactorWouldBeSkipped(t *testing.T) {
 	for name, setup := range map[string]func(*fakeZitadel){
-		"enrolled totp": func(f *fakeZitadel) {
-			f.completes("AUTHENTICATION_METHOD_TYPE_PASSWORD", "AUTHENTICATION_METHOD_TYPE_TOTP")
+		"enrolled passkey only": func(f *fakeZitadel) {
+			f.completes("AUTHENTICATION_METHOD_TYPE_PASSWORD", "AUTHENTICATION_METHOD_TYPE_PASSKEY")
 		},
 		"unknown method": func(f *fakeZitadel) {
 			f.completes("AUTHENTICATION_METHOD_TYPE_SOMETHING_NEW")

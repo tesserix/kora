@@ -78,6 +78,8 @@ type Handler struct {
 	signUps   *ratelimit.Window
 	codes     *ratelimit.Window
 	mailSends *ratelimit.Window
+
+	totp *totpChallenges
 }
 
 func NewHandler(cfg Config) *Handler {
@@ -91,6 +93,7 @@ func NewHandler(cfg Config) *Handler {
 		// one at the rate a person types, not the rate a script does.
 		codes:     ratelimit.NewWindow(10, 15*time.Minute),
 		mailSends: ratelimit.NewWindow(5, time.Hour),
+		totp:      newTOTPChallenges(),
 	}
 	if strings.TrimSpace(cfg.Token) != "" {
 		h.zitadel = newZitadel(cfg.Issuer, cfg.ProjectID, cfg.Token)
@@ -108,6 +111,7 @@ func (h *Handler) Mount(r *gin.Engine) {
 	g.POST("/password-reset/confirm", h.passwordResetConfirm)
 	g.POST("/idp/start", h.idpStart)
 	g.POST("/idp/finish", h.idpFinish)
+	g.POST("/totp", h.verifyTOTP)
 }
 
 func (h *Handler) ready(c *gin.Context) bool {
@@ -177,22 +181,41 @@ func (h *Handler) complete(c *gin.Context, userID string, s session, federated b
 		unavailable(c, "read login settings", err)
 		return
 	}
-	if settings.ForceMFA || (settings.ForceMFALocalOnly && !federated) {
-		secondFactorRequired(c)
-		return
-	}
 	methods, err := h.zitadel.authMethods(ctx, userID)
 	if err != nil {
 		unavailable(c, "read auth methods", err)
 		return
 	}
+	// Zitadel enforces no second factor on a login client's session, so
+	// kora-api does: one is owed when the policy forces it or the person
+	// enrolled one, whichever way they signed in.
+	owed := settings.ForceMFA || (settings.ForceMFALocalOnly && !federated)
+	hasTOTP := false
 	for _, m := range methods {
-		if m != "AUTHENTICATION_METHOD_TYPE_PASSWORD" && m != "AUTHENTICATION_METHOD_TYPE_IDP" {
-			secondFactorRequired(c)
-			return
+		switch m {
+		case "AUTHENTICATION_METHOD_TYPE_PASSWORD", "AUTHENTICATION_METHOD_TYPE_IDP":
+		case "AUTHENTICATION_METHOD_TYPE_TOTP":
+			hasTOTP, owed = true, true
+		default:
+			owed = true
 		}
 	}
+	switch {
+	case owed && hasTOTP:
+		// An authenticator app satisfies it even beside a passkey or key.
+		h.totpRequired(c, pendingTOTP{userID: userID, session: s, req: req, clientID: clientID})
+		return
+	case owed:
+		secondFactorRequired(c)
+		return
+	}
+	h.finish(c, s, req, clientID)
+}
 
+// finish turns a fully checked session into the authorization code the app
+// redeems.
+func (h *Handler) finish(c *gin.Context, s session, req completion, clientID string) {
+	ctx := c.Request.Context()
 	state, err := randomState()
 	if err != nil {
 		unavailable(c, "state", err)
@@ -218,7 +241,7 @@ func (h *Handler) complete(c *gin.Context, userID string, s session, federated b
 
 func secondFactorRequired(c *gin.Context) {
 	httpx.Error(c, http.StatusForbidden, "second_factor_required",
-		"This account uses two-step verification, which the Kora app does not support yet.")
+		"This account's two-step verification needs an authenticator app. Kora doesn't support security keys or passkeys yet.")
 }
 
 func randomState() (string, error) {

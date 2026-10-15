@@ -108,6 +108,7 @@ var v1AuthAllowlist = map[string]string{
 	"POST /v1/auth/password-reset/confirm": "signin: credential is the emailed code",
 	"POST /v1/auth/idp/start":              "signin: returns a provider URL, grants nothing",
 	"POST /v1/auth/idp/finish":             "signin: credential is the finished intent",
+	"POST /v1/auth/totp":                   "signin: credential is the pending challenge plus the code",
 }
 
 // concretePath turns a gin route TEMPLATE ("/v1/logs/:id", "/v1/admin/entities/:type")
