@@ -246,6 +246,11 @@ func NewRouter(deps Deps) *gin.Engine {
 		// they are the same promise — you can get your data out, and you can
 		// have it removed — and a reader looking for one should find the other.
 		v1.GET("/me/export", export.NewHandler(export.NewService(deps.DB), slog.Default()).Export)
+		// Two-step settings act on the caller's own Zitadel user through the
+		// same login-client credential as sign-in, so they live with it.
+		if deps.SignIn != nil {
+			deps.SignIn.MountAccount(v1)
+		}
 		v1.POST("/onboarding", onboardingHandler.Submit)
 		v1.GET("/notifications", notificationsHandler.List)
 		v1.GET("/notifications/unread-count", notificationsHandler.UnreadCount)

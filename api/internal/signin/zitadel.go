@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -302,6 +303,62 @@ func (z *zitadel) checkTOTP(ctx context.Context, s session, code string) (sessio
 		return session{}, fmt.Errorf("signin: totp check without a session token: %w", errUnavailable)
 	}
 	return session{id: s.id, token: wire.SessionToken}, nil
+}
+
+type totpSetup struct {
+	URI    string `json:"uri"`
+	Secret string `json:"secret"`
+}
+
+// registerTOTP starts adding an authenticator app to userID: the otpauth URI
+// and secret the app imports. Nothing is enrolled until verifyTOTPRegistration
+// accepts a code from it, and a second call replaces an unconfirmed start.
+func (z *zitadel) registerTOTP(ctx context.Context, userID string) (totpSetup, error) {
+	var wire totpSetup
+	if err := z.do(ctx, http.MethodPost, "/v2/users/"+url.PathEscape(userID)+"/totp", map[string]any{}, &wire); err != nil {
+		return totpSetup{}, err
+	}
+	if wire.URI == "" || wire.Secret == "" {
+		return totpSetup{}, fmt.Errorf("signin: totp registration without a uri or secret: %w", errUnavailable)
+	}
+	return wire, nil
+}
+
+// verifyTOTPRegistration enrolls userID's authenticator app once it proves it
+// generates the right codes.
+func (z *zitadel) verifyTOTPRegistration(ctx context.Context, userID, code string) error {
+	err := z.do(ctx, http.MethodPost, "/v2/users/"+url.PathEscape(userID)+"/totp/verify",
+		map[string]any{"code": code}, nil)
+	if errors.Is(err, errRejected) {
+		return errors.Join(errInvalidCode, err)
+	}
+	return err
+}
+
+// removeTOTP removes userID's authenticator app.
+func (z *zitadel) removeTOTP(ctx context.Context, userID string) error {
+	return z.do(ctx, http.MethodDelete, "/v2/users/"+url.PathEscape(userID)+"/totp", nil, nil)
+}
+
+// totpSession proves code is userID's current authenticator code by opening a
+// session on it. The session is a proof and nothing more, so it is ended
+// straight away; a failure to end it leaves only an idle session to expire.
+func (z *zitadel) totpSession(ctx context.Context, userID, code string) error {
+	s, err := z.createSession(ctx, map[string]any{
+		"user": map[string]any{"userId": userID},
+		"totp": map[string]any{"code": code},
+	})
+	if errors.Is(err, errRejected) {
+		return errors.Join(errInvalidCode, err)
+	}
+	if err != nil {
+		return err
+	}
+	if err := z.do(ctx, http.MethodDelete, "/v2/sessions/"+url.PathEscape(s.id),
+		map[string]any{"sessionToken": s.token}, nil); err != nil {
+		slog.Warn("signin: end totp proof session", "err", err)
+	}
+	return nil
 }
 
 // finalize ends authRequestID with s and returns the callback URL Zitadel
