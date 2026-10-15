@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { type TextInput, useWindowDimensions, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { AuthSessionError, isAuthConfigured, signInWithPassword, signInWithProvider, type Provider } from "@/auth/session";
-import { authErrorMessage, holdCredentials } from "@/auth/flow";
+import { authErrorMessage, holdCredentials, needsSecondFactor } from "@/auth/flow";
 import { clearSnapshot } from "../modules/widget-bridge";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
@@ -66,6 +66,10 @@ export default function SignIn() {
       await step();
       router.replace("/");
     } catch (e: unknown) {
+      if (needsSecondFactor(e)) {
+        router.push("/two-step");
+        return;
+      }
       if (viaPassword && e instanceof AuthSessionError && e.code === "email_not_verified") {
         // kora-api has just sent a fresh code. Hold the password so a correct
         // code signs straight in.

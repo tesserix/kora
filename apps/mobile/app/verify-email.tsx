@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { account, signInWithPassword } from "@/auth/session";
-import { authErrorMessage, takeCredentials } from "@/auth/flow";
+import { authErrorMessage, needsSecondFactor, takeCredentials } from "@/auth/flow";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { AuthScaffold } from "@/components/AuthScaffold";
@@ -52,6 +52,10 @@ export default function VerifyEmail() {
       await signInWithPassword(held.email, held.password);
       router.replace("/");
     } catch (e: unknown) {
+      if (needsSecondFactor(e)) {
+        router.replace("/two-step");
+        return;
+      }
       setError(authErrorMessage(e));
     } finally {
       setBusy(false);

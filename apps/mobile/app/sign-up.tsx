@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Linking, type TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { account, signInWithProvider, type Provider } from "@/auth/session";
-import { authErrorMessage, holdCredentials, passwordProblem, PASSWORD_RULES } from "@/auth/flow";
+import { authErrorMessage, holdCredentials, needsSecondFactor, passwordProblem, PASSWORD_RULES } from "@/auth/flow";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { AuthScaffold } from "@/components/AuthScaffold";
@@ -58,6 +58,10 @@ export default function SignUp() {
       await signInWithProvider(provider);
       router.replace("/");
     } catch (e: unknown) {
+      if (needsSecondFactor(e)) {
+        router.push("/two-step");
+        return;
+      }
       setError(authErrorMessage(e));
     } finally {
       setBusy(false);

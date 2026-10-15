@@ -85,6 +85,44 @@ test("a refusal carries kora-api's code and wording and redeems nothing", async 
   expect(session.currentUserId()).toBeNull();
 });
 
+test("an authenticator code finishes a held sign-in with the first step's verifier", async () => {
+  fetchMock.mockResolvedValueOnce(
+    apiResponse(403, { error: "totp_required", message: "Update Kora.", challenge: "ch-1" }),
+  );
+  await expect(session.signInWithPassword("ann@example.com", "pw")).rejects.toMatchObject({ code: "totp_required" });
+  const challenge = JSON.parse(fetchMock.mock.calls[0][1].body).code_challenge;
+
+  fetchMock.mockResolvedValueOnce(apiResponse(200, { data: { code: "c2" } }));
+  fetchMock.mockResolvedValueOnce(tokenResponse({ access_token: jwt({ sub: "user-1" }), refresh_token: "rt", expires_in: 3600 }));
+  await session.completeTOTP("123456");
+
+  const [url, init] = fetchMock.mock.calls[1];
+  expect(url).toBe("http://localhost:8080/v1/auth/totp");
+  expect(JSON.parse(init.body)).toEqual({ challenge: "ch-1", code: "123456" });
+  // Redeemed with the verifier whose challenge the sign-in step sent.
+  const verifier = new URLSearchParams(fetchMock.mock.calls[2][1].body).get("code_verifier")!;
+  const digest = require("crypto").createHash("sha256").update(verifier).digest("base64url");
+  expect(digest).toBe(challenge);
+  expect(session.currentUserId()).toBe("user-1");
+
+  // Spent: a second completion has nothing to finish.
+  await expect(session.completeTOTP("123456")).rejects.toMatchObject({ code: "challenge_expired" });
+});
+
+test("a wrong authenticator code keeps the sign-in held; an expired one drops it", async () => {
+  fetchMock.mockResolvedValueOnce(apiResponse(403, { error: "totp_required", challenge: "ch-1" }));
+  await expect(session.signInWithPassword("ann@example.com", "pw")).rejects.toBeTruthy();
+
+  fetchMock.mockResolvedValueOnce(apiResponse(400, { error: "invalid_code" }));
+  await expect(session.completeTOTP("000000")).rejects.toMatchObject({ code: "invalid_code" });
+  fetchMock.mockResolvedValueOnce(apiResponse(401, { error: "challenge_expired" }));
+  await expect(session.completeTOTP("000000")).rejects.toMatchObject({ code: "challenge_expired" });
+
+  fetchMock.mockClear();
+  await expect(session.completeTOTP("123456")).rejects.toMatchObject({ code: "challenge_expired" });
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
 test("provider sign-in goes straight to the provider and finishes through kora-api", async () => {
   fetchMock.mockResolvedValueOnce(apiResponse(200, { data: { auth_url: "https://accounts.google.com/o/oauth2/auth?x" } }));
   mockOpenAuthSession.mockResolvedValue({
