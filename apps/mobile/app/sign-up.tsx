@@ -13,7 +13,9 @@ import { safeBack } from "@/lib/safeBack";
 import { useTheme } from "@/theme";
 
 const TERMS_URL = "https://tesserix.app/terms";
-const PRIVACY_URL = "https://tesserix.app/privacy";
+// Kora's own policy: the general /privacy page doesn't cover health data,
+// meal photos, voice notes or the AI services that read them.
+const PRIVACY_URL = "https://tesserix.app/privacy/kora";
 
 export default function SignUp() {
   const { colors, instrument, spacing } = useTheme();

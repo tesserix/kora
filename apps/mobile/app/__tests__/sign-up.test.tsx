@@ -1,5 +1,6 @@
 import { act, fireEvent, render } from "@testing-library/react-native";
 import { router } from "expo-router";
+import { Linking } from "react-native";
 
 import SignUp from "../sign-up";
 import { takeCredentials } from "@/auth/flow";
@@ -54,4 +55,12 @@ test("offers Apple and Google here too", async () => {
   await fireEvent.press(ui.getByLabelText("Continue with Google"));
   expect(sessionMock.signInWithProvider).toHaveBeenCalledWith("google");
   expect(router.replace).toHaveBeenCalledWith("/");
+});
+
+test("the privacy link opens Kora's own policy, not the general one", async () => {
+  const open = jest.spyOn(Linking, "openURL").mockResolvedValue(true);
+  const ui = await render(<SignUp />);
+  await fireEvent.press(ui.getByText("Privacy Policy"));
+  expect(open).toHaveBeenCalledWith("https://tesserix.app/privacy/kora");
+  open.mockRestore();
 });
