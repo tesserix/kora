@@ -63,6 +63,9 @@ export class AuthSessionError extends Error {
   constructor(
     public readonly code: string,
     public readonly userMessage?: string,
+    // challenge accompanies totp_required: the handle kora-api holds the
+    // half-finished sign-in under.
+    public readonly challenge?: string,
   ) {
     super(code);
     this.name = "AuthSessionError";
@@ -233,8 +236,13 @@ export async function authPost<T>(path: string, body: Record<string, string>): P
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const parsed = (await res.json().catch(() => ({}))) as { data?: T; error?: string; message?: string };
-  if (!res.ok) throw new AuthSessionError(parsed.error ?? `http_${res.status}`, parsed.message);
+  const parsed = (await res.json().catch(() => ({}))) as {
+    data?: T;
+    error?: string;
+    message?: string;
+    challenge?: string;
+  };
+  if (!res.ok) throw new AuthSessionError(parsed.error ?? `http_${res.status}`, parsed.message, parsed.challenge);
   return (parsed.data ?? {}) as T;
 }
 
@@ -251,20 +259,57 @@ async function redeem(code: string, verifier: string): Promise<void> {
   emit();
 }
 
+// A sign-in waiting on an authenticator code: kora-api's challenge, and the
+// PKCE verifier the eventual authorization code must be redeemed with. Memory
+// only, like the verifier always is.
+let secondFactor: { challenge: string; verifier: string } | null = null;
+
+// finishOrHold redeems a first step's code, or, when kora-api answers that an
+// authenticator code is owed, holds the sign-in for completeTOTP and rethrows.
+async function finishOrHold(step: Promise<{ code: string }>, verifier: string): Promise<void> {
+  let code: string;
+  try {
+    ({ code } = await step);
+    secondFactor = null;
+  } catch (e) {
+    secondFactor =
+      e instanceof AuthSessionError && e.code === "totp_required" && e.challenge
+        ? { challenge: e.challenge, verifier }
+        : null;
+    throw e;
+  }
+  await redeem(code, verifier);
+}
+
 // signInWithPassword signs in with an email and password. Throws
 // AuthSessionError("invalid_credentials"), ("email_not_verified") when the
-// account still needs its emailed code (a fresh one has just been sent), or
-// another code from kora-api.
+// account still needs its emailed code (a fresh one has just been sent),
+// ("totp_required") when completeTOTP must follow, or another code from
+// kora-api.
 export async function signInWithPassword(email: string, password: string): Promise<void> {
   if (!isAuthConfigured) throw new AuthSessionError("unconfigured");
   const { verifier, challenge } = await pkce();
-  const { code } = await authPost<{ code: string }>("sign-in", {
-    email,
-    password,
-    platform: PLATFORM,
-    code_challenge: challenge,
-  });
-  await redeem(code, verifier);
+  await finishOrHold(
+    authPost<{ code: string }>("sign-in", { email, password, platform: PLATFORM, code_challenge: challenge }),
+    verifier,
+  );
+}
+
+// completeTOTP finishes the sign-in held by a totp_required with the code from
+// the person's authenticator app. Throws ("invalid_code") for a wrong code,
+// which can be retried, and ("challenge_expired") when the sign-in has to
+// start again.
+export async function completeTOTP(code: string): Promise<void> {
+  const held = secondFactor;
+  if (!held) throw new AuthSessionError("challenge_expired");
+  try {
+    const { code: authCode } = await authPost<{ code: string }>("totp", { challenge: held.challenge, code });
+    secondFactor = null;
+    await redeem(authCode, held.verifier);
+  } catch (e) {
+    if (e instanceof AuthSessionError && e.code === "challenge_expired") secondFactor = null;
+    throw e;
+  }
 }
 
 // signInWithProvider goes straight to Google's or Apple's own sign-in in the
@@ -285,14 +330,16 @@ export async function signInWithProvider(provider: Provider): Promise<void> {
   }
   if (!callback.id || !callback.token) throw new AuthSessionError("provider_failed");
   const { verifier, challenge } = await pkce();
-  const { code } = await authPost<{ code: string }>("idp/finish", {
-    provider,
-    intent_id: callback.id,
-    intent_token: callback.token,
-    platform: PLATFORM,
-    code_challenge: challenge,
-  });
-  await redeem(code, verifier);
+  await finishOrHold(
+    authPost<{ code: string }>("idp/finish", {
+      provider,
+      intent_id: callback.id,
+      intent_token: callback.token,
+      platform: PLATFORM,
+      code_challenge: challenge,
+    }),
+    verifier,
+  );
 }
 
 // The account steps that end in no session of their own: the screens follow
@@ -374,4 +421,5 @@ export function __resetForTests(): void {
   listeners.clear();
   ready = null;
   refreshing = null;
+  secondFactor = null;
 }

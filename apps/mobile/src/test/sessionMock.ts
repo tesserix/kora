@@ -14,6 +14,7 @@ class AuthSessionError extends Error {
   constructor(
     public readonly code: string,
     public readonly userMessage?: string,
+    public readonly challenge?: string,
   ) {
     super(code);
     this.name = "AuthSessionError";
@@ -32,6 +33,7 @@ const defaults = {
   },
   signInWithPassword: async (_email: string, _password: string) => {},
   signInWithProvider: async (_provider: "google" | "apple") => {},
+  completeTOTP: async (_code: string) => {},
   authPost: async (_path: string, _body: Record<string, string>) => ({}),
   signOut: async () => {},
   subjectOf: (_jwt: string): string | null => null,
@@ -48,6 +50,7 @@ export const sessionMock = {
   onAuthChange: jest.fn(defaults.onAuthChange),
   signInWithPassword: jest.fn(defaults.signInWithPassword),
   signInWithProvider: jest.fn(defaults.signInWithProvider),
+  completeTOTP: jest.fn(defaults.completeTOTP),
   authPost: jest.fn(defaults.authPost),
   account: {
     signUp: jest.fn(async (_name: string, _email: string, _password: string) => ({})),

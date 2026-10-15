@@ -16,6 +16,12 @@ export function authErrorMessage(err: unknown): string | null {
   return "Something went wrong. Please try again.";
 }
 
+// needsSecondFactor reports a sign-in step that stopped for an authenticator
+// code. session.ts has held the sign-in; the caller goes to /two-step.
+export function needsSecondFactor(err: unknown): boolean {
+  return err instanceof AuthSessionError && err.code === "totp_required";
+}
+
 // Zitadel's password complexity policy on the TESSERIX org. Checked here only
 // to answer before a round trip; kora-api's weak_password stays the authority.
 export const PASSWORD_RULES = "At least 12 characters, with upper and lower case letters, a number and a symbol.";

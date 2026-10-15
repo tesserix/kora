@@ -284,6 +284,26 @@ func (z *zitadel) createSession(ctx context.Context, checks map[string]any) (ses
 	return session{id: wire.SessionID, token: wire.SessionToken}, nil
 }
 
+// checkTOTP adds an authenticator-app code to s. Zitadel answers with a new
+// session token, which replaces s's: the old one no longer finalizes.
+func (z *zitadel) checkTOTP(ctx context.Context, s session, code string) (session, error) {
+	var wire struct {
+		SessionToken string `json:"sessionToken"`
+	}
+	body := map[string]any{"sessionToken": s.token, "checks": map[string]any{"totp": map[string]any{"code": code}}}
+	err := z.do(ctx, http.MethodPatch, "/v2/sessions/"+url.PathEscape(s.id), body, &wire)
+	if errors.Is(err, errRejected) {
+		return session{}, errors.Join(errInvalidCode, err)
+	}
+	if err != nil {
+		return session{}, err
+	}
+	if wire.SessionToken == "" {
+		return session{}, fmt.Errorf("signin: totp check without a session token: %w", errUnavailable)
+	}
+	return session{id: s.id, token: wire.SessionToken}, nil
+}
+
 // finalize ends authRequestID with s and returns the callback URL Zitadel
 // built: the client's redirect URI carrying the code and state.
 func (z *zitadel) finalize(ctx context.Context, authRequestID string, s session) (string, error) {

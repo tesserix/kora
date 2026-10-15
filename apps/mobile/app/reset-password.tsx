@@ -2,7 +2,7 @@ import { useState } from "react";
 import { View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { account, signInWithPassword } from "@/auth/session";
-import { authErrorMessage, passwordProblem, PASSWORD_RULES } from "@/auth/flow";
+import { authErrorMessage, needsSecondFactor, passwordProblem, PASSWORD_RULES } from "@/auth/flow";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { AuthScaffold } from "@/components/AuthScaffold";
@@ -29,6 +29,11 @@ export default function ResetPassword() {
     try {
       await work();
     } catch (e: unknown) {
+      // The new password is set by now; only the sign-in after it stopped.
+      if (needsSecondFactor(e)) {
+        router.replace("/two-step");
+        return;
+      }
       setError(authErrorMessage(e));
     } finally {
       setBusy(false);

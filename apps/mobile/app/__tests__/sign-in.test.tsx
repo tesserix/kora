@@ -69,6 +69,14 @@ test("an unverified email continues on the code screen holding the password", as
   expect(takeCredentials("ann@example.com")).toEqual({ email: "ann@example.com", password: "pw" });
 });
 
+test("an account with an authenticator app continues on the code screen", async () => {
+  sessionMock.signInWithPassword.mockRejectedValueOnce(new sessionMock.AuthSessionError("totp_required", "", "ch-1"));
+  const ui = await render(<SignIn />);
+  await fillAndSubmit(ui, "ann@example.com", "pw");
+  expect(router.push).toHaveBeenCalledWith("/two-step");
+  expect(router.replace).not.toHaveBeenCalled();
+});
+
 test("Apple and Google go to the provider and home", async () => {
   const ui = await render(<SignIn />);
   await fireEvent.press(ui.getByLabelText("Continue with Apple"));
