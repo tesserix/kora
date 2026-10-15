@@ -44,6 +44,11 @@ func (p PhotoResolver) ResolvePhoto(ctx context.Context, uid uuid.UUID, image []
 	if err := p.allowed(ctx, uid); err != nil {
 		return ai.Resolution{}, err
 	}
+	// Vision starts alongside OCR rather than after it: OCR takes 7-10 s on a
+	// meal photo that has no label to read, and vision used to wait it out.
+	// Its answer is used only on the vision route; any other route cancels it.
+	guess := p.startVision(ctx, uid, image, mime)
+	defer guess.stop()
 	started := time.Now()
 	ocrCtx, ocrCancel := context.WithTimeout(ctx, 10*time.Second)
 	read, readErr := p.reader.Read(ocrCtx, image, mime)
@@ -51,6 +56,11 @@ func (p PhotoResolver) ResolvePhoto(ctx context.Context, uid uuid.UUID, image []
 	label, checkErr := checkedRead(read)
 	if readErr == nil {
 		readErr = checkErr
+	}
+	if readErr == nil {
+		// A clean read can never take the vision route (see below), so stop
+		// paying for it now rather than after the decision.
+		guess.stop()
 	}
 	recorder := Analyzer{budget: p.budget}
 	if err := recorder.record(ctx, uid, ai.Usage{Provider: "document-intelligence", CallType: "photo_ocr", LatencyMs: int(time.Since(started).Milliseconds())}, read.CostUSD, readErr); err != nil {
@@ -132,7 +142,10 @@ func (p PhotoResolver) ResolvePhoto(ctx context.Context, uid uuid.UUID, image []
 		checked.addIssue("vision_review")
 		return photoLabelResult(checked, evidence), nil
 	case "vision":
-		res, err := p.vision.ResolvePhoto(context.WithValue(ctx, photoEvidenceKey{}, evidence), uid, image, mime)
+		res, err := guess.wait()
+		evidence.MealDecisionModel = guess.evidence.MealDecisionModel
+		evidence.MealReviewModel = guess.evidence.MealReviewModel
+		evidence.MealReviewStatus = guess.evidence.MealReviewStatus
 		res.PhotoEvidence = evidence
 		if len(res.Candidates) > 0 {
 			if res.Tier == ai.TierAuto {
@@ -151,6 +164,39 @@ func (p PhotoResolver) ResolvePhoto(ctx context.Context, uid uuid.UUID, image []
 	default:
 		return ai.Resolution{PhotoEvidence: evidence}, ErrDecisionUnavailable
 	}
+}
+
+// visionGuess is a vision call started before the route is known. It writes
+// its meal-review fields to its own evidence, merged in only if it is used,
+// so the goroutine never shares the request's evidence.
+type visionGuess struct {
+	cancel   context.CancelFunc
+	done     chan struct{}
+	evidence *ai.PhotoEvidence
+	res      ai.Resolution
+	err      error
+}
+
+func (p PhotoResolver) startVision(ctx context.Context, uid uuid.UUID, image []byte, mime string) *visionGuess {
+	ctx, cancel := context.WithCancel(ctx)
+	g := &visionGuess{cancel: cancel, done: make(chan struct{}), evidence: &ai.PhotoEvidence{}}
+	go func() {
+		defer close(g.done)
+		g.res, g.err = p.vision.ResolvePhoto(context.WithValue(ctx, photoEvidenceKey{}, g.evidence), uid, image, mime)
+	}()
+	return g
+}
+
+func (g *visionGuess) wait() (ai.Resolution, error) {
+	<-g.done
+	return g.res, g.err
+}
+
+// stop cancels the call and waits for it to return, so the usage it records
+// lands before the request ends. Safe to call more than once.
+func (g *visionGuess) stop() {
+	g.cancel()
+	<-g.done
 }
 
 func (p PhotoResolver) allowed(ctx context.Context, uid uuid.UUID) error {
