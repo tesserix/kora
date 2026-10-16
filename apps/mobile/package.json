@@ -69,7 +69,8 @@
     "shots": "node scripts/shots.mjs",
     "shots:test": "node --test scripts/__tests__/*.test.mjs",
     "shots:golden": "node scripts/shots-golden.mjs",
-    "shots:compare": "node scripts/shots-compare.mjs"
+    "shots:compare": "node scripts/shots-compare.mjs",
+    "release:android:local": "./scripts/android-local-release.sh"
   },
   "jest": {
     "preset": "jest-expo",
