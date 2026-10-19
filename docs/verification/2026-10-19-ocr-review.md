@@ -85,6 +85,13 @@ The disposable local Postgres container was removed after verification. The
 reviewed patch is `/tmp/kora-ocr-fix.patch`; it includes all modified and new files
 and is based on current main, not the older original checkout.
 
+During release, GitHub CI exposed an npm-version lockfile difference: npm 11 had
+omitted two optional nested TypeScript 5.9.3 peers required by npm 10. The failure
+was reproduced using CI's Node 22.19.0 / npm 10.9.3 (`npm ci` reported the missing
+peers), then the lockfile was regenerated with that same toolchain. A real clean
+install subsequently passed. The application's pinned TypeScript 6 remains
+unchanged; no dependency constraint, install flag, or CI gate was relaxed.
+
 Release through the normal reviewed GitOps API path and the normal mobile release
 path. The approved mobile release uses version 1.0.4, with EAS-managed platform
 build numbers incremented by the production profile. This version-only config
