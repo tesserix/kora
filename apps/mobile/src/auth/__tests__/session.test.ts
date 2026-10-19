@@ -16,10 +16,14 @@ function jwt(claims: Record<string, unknown>): string {
 
 type Session = typeof import("@/auth/session");
 let session: Session;
+// Re-required per test: resetModules gives session.ts a fresh mock instance.
+let AsyncStorage: typeof import("@react-native-async-storage/async-storage").default;
 const fetchMock = jest.fn();
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.resetModules();
+  AsyncStorage = require("@react-native-async-storage/async-storage");
+  await AsyncStorage.clear();
   mockStore.clear();
   mockOpenAuthSession.mockReset();
   fetchMock.mockReset();
@@ -165,6 +169,7 @@ test("account calls post to their kora-api routes", async () => {
 });
 
 test("a persisted session is restored before the first auth callback", async () => {
+  await AsyncStorage.setItem("kora.installed", "1");
   mockStore.set(
     "kora.zitadel.session",
     JSON.stringify({ sub: "user-2", accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 3_600_000 }),
@@ -204,6 +209,30 @@ test("invalid_grant ends the session; a network failure does not", async () => {
   expect(session.currentUserId()).toBeNull();
   expect(seen).toContain(null);
   expect(mockStore.has("kora.zitadel.session")).toBe(false);
+});
+
+test("Zitadel's invalid_request for a dead refresh token ends the session", async () => {
+  await signInAs("user-1");
+  fetchMock.mockResolvedValueOnce(
+    tokenResponse({ error: "invalid_request", error_description: "Errors.User.RefreshToken.Invalid" }, false),
+  );
+  expect(await session.getAccessToken(true)).toBeNull();
+  expect(session.currentUserId()).toBeNull();
+  expect(mockStore.has("kora.zitadel.session")).toBe(false);
+});
+
+test("a fresh install drops a keychain session left by a deleted install", async () => {
+  mockStore.set("kora.zitadel.session", JSON.stringify({ sub: "old", accessToken: "a", refreshToken: "r", expiresAt: 0 }));
+  await session.authReady();
+  expect(session.currentUserId()).toBeNull();
+  expect(mockStore.has("kora.zitadel.session")).toBe(false);
+});
+
+test("an existing install keeps its session when the marker is first written", async () => {
+  await AsyncStorage.setItem("kora.appearance", "dark");
+  mockStore.set("kora.zitadel.session", JSON.stringify({ sub: "kept", accessToken: "a", refreshToken: "r", expiresAt: 0 }));
+  await session.authReady();
+  expect(session.currentUserId()).toBe("kept");
 });
 
 test("sign-out clears locally first and revokes the refresh token best-effort", async () => {

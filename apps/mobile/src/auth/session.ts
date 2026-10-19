@@ -11,6 +11,7 @@
 // getAccessToken for requests.
 import { Platform } from "react-native";
 import * as Crypto from "expo-crypto";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 
@@ -88,8 +89,22 @@ async function persist(next: Session | null): Promise<void> {
   }
 }
 
+// iOS keeps keychain items after the app is deleted, but wipes AsyncStorage.
+// Without this, a reinstall restored a dead session and stranded the user.
+const INSTALL_MARKER_KEY = "kora.installed";
+
+async function dropSessionFromPreviousInstall(): Promise<void> {
+  if (await AsyncStorage.getItem(INSTALL_MARKER_KEY)) return;
+  // No marker but other keys: an install from before this check, not a fresh one.
+  if ((await AsyncStorage.getAllKeys()).length === 0) {
+    await SecureStore.deleteItemAsync(STORE_KEY, KEYCHAIN_OPTIONS);
+  }
+  await AsyncStorage.setItem(INSTALL_MARKER_KEY, "1");
+}
+
 async function restore(): Promise<void> {
   try {
+    await dropSessionFromPreviousInstall();
     const raw = await SecureStore.getItemAsync(STORE_KEY, KEYCHAIN_OPTIONS);
     const parsed = raw ? (JSON.parse(raw) as Partial<Session>) : null;
     session =
@@ -369,8 +384,15 @@ async function refresh(): Promise<string | null> {
   } catch (err) {
     // invalid_grant means the refresh token is dead (revoked, expired, user
     // deleted): no retry can recover it, so the session ends. Anything else
-    // (offline, 5xx) leaves it intact for the next attempt.
-    if (err instanceof AuthSessionError && err.code === "token_invalid_grant" && session === current) {
+    // (offline, 5xx) leaves it intact for the next attempt. Zitadel answers a
+    // dead refresh token with invalid_request (Errors.User.RefreshToken.Invalid),
+    // not invalid_grant; treating that as transient stranded users on
+    // "Couldn't load your profile" with no request ever reaching the API.
+    if (
+      err instanceof AuthSessionError &&
+      (err.code === "token_invalid_grant" || err.code === "token_invalid_request") &&
+      session === current
+    ) {
       await persist(null);
       emit();
       return null;
