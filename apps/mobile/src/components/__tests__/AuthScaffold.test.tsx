@@ -13,7 +13,11 @@ test("renders both body and footer content", async () => {
   expect(getByText("Continue")).toBeTruthy();
 });
 
-type Node = { type?: unknown; props?: Record<string, unknown>; children?: unknown } | null;
+type Node = {
+  type?: unknown;
+  props?: Record<string, unknown>;
+  children?: unknown;
+} | null;
 
 function find(node: unknown, match: (n: Node) => boolean): Node {
   if (!node || typeof node !== "object") return null;
@@ -82,10 +86,9 @@ function testIdOrder(node: unknown, out: string[] = []): string[] {
 }
 
 const flatten = (style: unknown) =>
-  (Array.isArray(style) ? Object.assign({}, ...style.filter(Boolean)) : style) as Record<
-    string,
-    unknown
-  >;
+  (Array.isArray(style)
+    ? Object.assign({}, ...style.filter(Boolean))
+    : style) as Record<string, unknown>;
 
 test("the footer is genuinely outside the scroll view, not merely styled apart", async () => {
   // The shipped screens put the primary action inline at the end of the scroll,
@@ -103,9 +106,23 @@ test("the footer is genuinely outside the scroll view, not merely styled apart",
   expect(find(scroll, byTestId("auth-scaffold-footer"))).toBeNull();
 
   const style = getByTestId("auth-scaffold-footer").props.style;
-  const flat = Array.isArray(style) ? Object.assign({}, ...style.filter(Boolean)) : style;
+  const flat = Array.isArray(style)
+    ? Object.assign({}, ...style.filter(Boolean))
+    : style;
   expect(flat.borderTopWidth).toBe(1);
   expect(flat.borderTopColor).toBeTruthy();
+});
+
+test("on iOS the footer rides above the keyboard", async () => {
+  // #604 dropped sign-in's own avoider and the keyboard covered "Sign in".
+  const { getByTestId } = await render(
+    <AuthScaffold footer={<Text>Continue</Text>}>
+      <Text>Body</Text>
+    </AuthScaffold>,
+  );
+  // `behavior` is not on the host View the avoider renders; see Sheet.test.
+  const avoider = getByTestId("auth-scaffold-keyboard-avoider");
+  expect(within(avoider).getByTestId("auth-scaffold-footer")).toBeTruthy();
 });
 
 test("no back control is rendered unless onBack is supplied", async () => {
@@ -122,7 +139,10 @@ test("progress without onBack renders the header but still no back control", asy
   // prop the whole header is skipped, so the inner gate is unreachable and a
   // regression there would go unnoticed.
   const { queryByLabelText, getAllByTestId } = await render(
-    <AuthScaffold footer={<Text>Continue</Text>} progress={{ step: 1, total: 2 }}>
+    <AuthScaffold
+      footer={<Text>Continue</Text>}
+      progress={{ step: 1, total: 2 }}
+    >
       <Text>Body</Text>
     </AuthScaffold>,
   );
@@ -143,7 +163,10 @@ test("onBack renders a labelled control and fires it", async () => {
 
 test("progress renders one dot per step and announces the position", async () => {
   const { getAllByTestId, getByLabelText } = await render(
-    <AuthScaffold footer={<Text>Continue</Text>} progress={{ step: 2, total: 2 }}>
+    <AuthScaffold
+      footer={<Text>Continue</Text>}
+      progress={{ step: 2, total: 2 }}
+    >
       <Text>Body</Text>
     </AuthScaffold>,
   );
@@ -153,11 +176,16 @@ test("progress renders one dot per step and announces the position", async () =>
 
 test("the current progress dot is visually distinct from the rest", async () => {
   const { getAllByTestId } = await render(
-    <AuthScaffold footer={<Text>Continue</Text>} progress={{ step: 1, total: 2 }}>
+    <AuthScaffold
+      footer={<Text>Continue</Text>}
+      progress={{ step: 1, total: 2 }}
+    >
       <Text>Body</Text>
     </AuthScaffold>,
   );
-  const [first, second] = getAllByTestId("progress-dot").map((d) => d.props.style);
+  const [first, second] = getAllByTestId("progress-dot").map(
+    (d) => d.props.style,
+  );
   expect(first.width).not.toBe(second.width);
   expect(first.backgroundColor).not.toBe(second.backgroundColor);
 });
@@ -165,7 +193,10 @@ test("the current progress dot is visually distinct from the rest", async () => 
 describe("AuthScaffold header", () => {
   it("renders a header element when given one", async () => {
     const { getByTestId } = await render(
-      <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+      <AuthScaffold
+        header={<Text testID="pinned">Target</Text>}
+        footer={<Text>Go</Text>}
+      >
         <Text>Body</Text>
       </AuthScaffold>,
     );
@@ -175,7 +206,10 @@ describe("AuthScaffold header", () => {
   it("keeps the header outside the scroll view at the default content size", async () => {
     const spy = withFontScale(1);
     const { getByTestId, queryByTestId } = await render(
-      <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+      <AuthScaffold
+        header={<Text testID="pinned">Target</Text>}
+        footer={<Text>Go</Text>}
+      >
         <Text testID="body">Body</Text>
       </AuthScaffold>,
     );
@@ -198,19 +232,32 @@ describe("AuthScaffold header", () => {
     // The onboarding screen uses header without onBack or progress — this is the
     // critical configuration on notched devices. The header wrapper must take the
     // top inset to avoid rendering under the notch.
-    const useSafeAreaInsetsSpy = jest.spyOn(SafeAreaContext, "useSafeAreaInsets");
-    useSafeAreaInsetsSpy.mockReturnValue({ top: 44, bottom: 0, left: 0, right: 0 });
+    const useSafeAreaInsetsSpy = jest.spyOn(
+      SafeAreaContext,
+      "useSafeAreaInsets",
+    );
+    useSafeAreaInsetsSpy.mockReturnValue({
+      top: 44,
+      bottom: 0,
+      left: 0,
+      right: 0,
+    });
 
     try {
       const { getByTestId } = await render(
-        <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+        <AuthScaffold
+          header={<Text testID="pinned">Target</Text>}
+          footer={<Text>Go</Text>}
+        >
           <Text>Body</Text>
         </AuthScaffold>,
       );
 
       const headerWrapper = getByTestId("auth-scaffold-header-wrapper");
       const style = headerWrapper.props.style;
-      const flatStyle = Array.isArray(style) ? Object.assign({}, ...style.filter(Boolean)) : style;
+      const flatStyle = Array.isArray(style)
+        ? Object.assign({}, ...style.filter(Boolean))
+        : style;
       expect(flatStyle.paddingTop).toBe(44);
     } finally {
       useSafeAreaInsetsSpy.mockRestore();
@@ -222,12 +269,23 @@ describe("AuthScaffold header", () => {
     // When header is present and no nav row, the header wrapper consumes the inset.
     // The scroll must NOT add it again — instead use spacing.md for the gap below the header.
     // This test pins that exactly one of the two takes the inset, not both.
-    const useSafeAreaInsetsSpy = jest.spyOn(SafeAreaContext, "useSafeAreaInsets");
-    useSafeAreaInsetsSpy.mockReturnValue({ top: 44, bottom: 0, left: 0, right: 0 });
+    const useSafeAreaInsetsSpy = jest.spyOn(
+      SafeAreaContext,
+      "useSafeAreaInsets",
+    );
+    useSafeAreaInsetsSpy.mockReturnValue({
+      top: 44,
+      bottom: 0,
+      left: 0,
+      right: 0,
+    });
 
     try {
       const { getByTestId } = await render(
-        <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+        <AuthScaffold
+          header={<Text testID="pinned">Target</Text>}
+          footer={<Text>Go</Text>}
+        >
           <Text>Body</Text>
         </AuthScaffold>,
       );
@@ -271,7 +329,10 @@ describe("header placement above accessibility text sizes (kora#284)", () => {
   });
 
   const scaffold = (
-    <AuthScaffold header={<Text testID="pinned">Target</Text>} footer={<Text>Go</Text>}>
+    <AuthScaffold
+      header={<Text testID="pinned">Target</Text>}
+      footer={<Text>Go</Text>}
+    >
       <Text testID="body">Body</Text>
     </AuthScaffold>
   );
@@ -280,21 +341,29 @@ describe("header placement above accessibility text sizes (kora#284)", () => {
     // `>`, not `>=`: 1.3 is the last size that behaves exactly as it always has.
     withFontScale(1.3);
     const { getByTestId } = await render(scaffold);
-    expect(within(getByTestId("auth-scaffold-scroll")).queryByTestId("pinned")).toBeNull();
+    expect(
+      within(getByTestId("auth-scaffold-scroll")).queryByTestId("pinned"),
+    ).toBeNull();
   });
 
   it("moves the header inside the scroll view just past the threshold", async () => {
     withFontScale(1.31);
     const { getByTestId } = await render(scaffold);
-    expect(within(getByTestId("auth-scaffold-scroll")).getByTestId("pinned")).toBeTruthy();
+    expect(
+      within(getByTestId("auth-scaffold-scroll")).getByTestId("pinned"),
+    ).toBeTruthy();
   });
 
   it("puts the scrolling header BEFORE the body, not after it", async () => {
     withFontScale(2.643);
     const { toJSON } = await render(scaffold);
     const order = testIdOrder(find(toJSON(), byTestId("auth-scaffold-scroll")));
-    expect(order.indexOf("auth-scaffold-header-wrapper")).toBeGreaterThanOrEqual(0);
-    expect(order.indexOf("auth-scaffold-header-wrapper")).toBeLessThan(order.indexOf("body"));
+    expect(
+      order.indexOf("auth-scaffold-header-wrapper"),
+    ).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("auth-scaffold-header-wrapper")).toBeLessThan(
+      order.indexOf("body"),
+    );
   });
 
   it("does not inset the scrolling header twice, horizontally or vertically", async () => {
@@ -307,12 +376,17 @@ describe("header placement above accessibility text sizes (kora#284)", () => {
     withFontScale(2.643);
 
     const { getByTestId } = await render(scaffold);
-    expect(flatten(getByTestId("auth-scaffold-header-wrapper").props.style).paddingTop).toBe(59);
-    expect(flatten(getByTestId("auth-scaffold-header-wrapper").props.style).marginHorizontal).toBe(
-      -24,
-    );
     expect(
-      flatten(getByTestId("auth-scaffold-scroll").props.contentContainerStyle).paddingTop,
+      flatten(getByTestId("auth-scaffold-header-wrapper").props.style)
+        .paddingTop,
+    ).toBe(59);
+    expect(
+      flatten(getByTestId("auth-scaffold-header-wrapper").props.style)
+        .marginHorizontal,
+    ).toBe(-24);
+    expect(
+      flatten(getByTestId("auth-scaffold-scroll").props.contentContainerStyle)
+        .paddingTop,
     ).toBe(0);
   });
 
@@ -333,7 +407,10 @@ describe("header placement above accessibility text sizes (kora#284)", () => {
 
     for (const scale of [1.3, 1.31, 2.643, 3.571]) {
       const spy = withFontScale(scale);
-      expect((await render(headerless)).toJSON()).toEqual(before);
+      // Serialized: KeyboardAvoidingView binds a fresh onLayout per instance.
+      expect(JSON.stringify((await render(headerless)).toJSON())).toBe(
+        JSON.stringify(before),
+      );
       spy.mockRestore();
     }
   });
