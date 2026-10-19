@@ -351,13 +351,13 @@ test("apiFetchMultipart forwards a caller signal that can abort the request", as
 });
 
 
-test("photo multipart waits for OCR, Jev and reviewed vision beyond the ordinary deadline", async () => {
+test.each(["/v1/resolve/photo", "/v1/resolve/label"])("multipart %s waits for OCR and review beyond the ordinary deadline", async (path) => {
   jest.useFakeTimers();
   try {
     (global.fetch as jest.Mock).mockImplementation(() => new Promise((resolve) => {
       setTimeout(() => resolve({ ok: true, json: async () => ({ data: { candidates: [], tier: "confirm" } }) }), 40_000);
     }));
-    const promise = apiFetchMultipart("/v1/resolve/photo", new FormData());
+    const promise = apiFetchMultipart(path, new FormData());
     const result = promise.then((data) => ({ data }), (error: Error) => ({ error }));
     await jest.advanceTimersByTimeAsync(40_001);
     expect(await result).toEqual({ data: { candidates: [], tier: "confirm" } });
@@ -369,6 +369,7 @@ test("photo multipart waits for OCR, Jev and reviewed vision beyond the ordinary
 
 test.each([
   ["/v1/resolve/photo", PHOTO_REQUEST_TIMEOUT_MS],
+  ["/v1/resolve/label", PHOTO_REQUEST_TIMEOUT_MS],
   ["/v1/resolve/voice", REQUEST_TIMEOUT_MS],
 ])("multipart %s retains a hard deadline", async (path, deadline) => {
   jest.useFakeTimers();

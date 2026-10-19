@@ -94,6 +94,10 @@ func (h Handler) Read(c *gin.Context) {
 		httpx.Error(c, http.StatusTooManyRequests, "budget_exhausted", "You've reached your AI usage limit — try again later")
 		return
 	}
+	if errors.Is(err, ErrReviewUnavailable) {
+		httpx.Error(c, http.StatusServiceUnavailable, "ai_analysis_unavailable", "Label analysis is temporarily unavailable. Please try again.")
+		return
+	}
 	if errors.Is(err, ErrUnreadable) {
 		httpx.Error(c, http.StatusUnprocessableEntity, "label_unreadable", "no nutrition panel could be read; retake the photo closer and flat")
 		return

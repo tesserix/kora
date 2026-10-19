@@ -504,7 +504,7 @@ export async function apiFetchMultipart(
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       }),
       init.signal,
-      path === "/v1/resolve/photo" ? PHOTO_REQUEST_TIMEOUT_MS : undefined,
+      path === "/v1/resolve/photo" || path === "/v1/resolve/label" ? PHOTO_REQUEST_TIMEOUT_MS : undefined,
     );
 
     if (!res.ok) return await throwApiError(res);

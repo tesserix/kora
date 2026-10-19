@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tesserix/kora/api/internal/auth"
+	"github.com/tesserix/kora/api/internal/labelocr"
 )
 
 func TestLabelReviewUsesAuthenticatedStrongerRouteAndNoInventedPortion(t *testing.T) {
@@ -45,6 +46,31 @@ func TestLabelReviewUsesAuthenticatedStrongerRouteAndNoInventedPortion(t *testin
 	require.NotContains(t, read.Fields, "consumed_amount")
 	require.Equal(t, "claude-sonnet-5-5", usage.Model)
 	require.Equal(t, 100, usage.TokensIn)
+}
+
+func TestLabelReviewReadsKilojouleOnlyPanels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		properties := body["response_format"].(map[string]any)["json_schema"].(map[string]any)["schema"].(map[string]any)["properties"].(map[string]any)
+		if _, ok := properties["energy_kj"]; !ok {
+			http.Error(w, "schema cannot read a kilojoule-only label", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"model":   "claude-sonnet-5-5",
+			"choices": []any{map[string]any{"message": map[string]any{"content": `{"basis":"per_100g","energy_kcal":null,"energy_kj":1046,"protein_g":10,"fat_g":10,"carbohydrate_g":30}`}}},
+		}))
+	}))
+	t.Cleanup(server.Close)
+	read, _, err := NewLabelReviewer("test-key", server.URL+"/v1").Review(auth.WithVerifiedToken(t.Context(), "verified"), []byte("image"), "image/png")
+	require.NoError(t, err)
+	require.JSONEq(t, `1046`, string(read.Fields["per_100g.energy_kj"].Value))
+	require.NotContains(t, read.Fields, "per_100g.energy_kcal", "the model must not calculate calories")
+	label, err := labelocr.Check(read.Fields, read.Failures)
+	require.NoError(t, err)
+	require.InDelta(t, 250, *label.Per100.EnergyKcal, 0.001)
 }
 
 func TestLabelReviewRequiresVerifiedIdentityAndNeverRetriesProviderErrors(t *testing.T) {
