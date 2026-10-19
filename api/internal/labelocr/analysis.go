@@ -16,6 +16,8 @@ import (
 
 var ErrBudgetExhausted = errors.New("label analysis budget exhausted")
 
+var ErrReviewUnavailable = errors.New("label review unavailable")
+
 // Reviewer performs one independent image reading using the stronger gateway route.
 type Reviewer interface {
 	Review(context.Context, []byte, string) (Read, ai.Usage, error)
@@ -62,7 +64,9 @@ func checkedRead(read Read) (Label, error) {
 
 // Analyze returns label facts only; an image is not evidence of consumption.
 func (a Analyzer) Analyze(ctx context.Context, uid uuid.UUID, photo []byte, mime string) (LabelResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, 22*time.Second)
+	// OCR and independent review run sequentially (14s + 12s), followed by
+	// bounded usage writes. Leave room for both before the client gives up.
+	ctx, cancel := context.WithTimeout(ctx, 35*time.Second)
 	defer cancel()
 	within, err := a.budget.WithinBudget(ctx, uid)
 	if err != nil {
@@ -90,6 +94,13 @@ func (a Analyzer) Analyze(ctx context.Context, uid uuid.UUID, photo []byte, mime
 			within, budgetErr := a.budget.WithinBudget(ctx, uid)
 			if budgetErr != nil || !within {
 				analysis.ReviewOutcome = "budget_unavailable"
+				if readErr != nil {
+					if budgetErr != nil {
+						readErr = errors.Join(ErrReviewUnavailable, budgetErr)
+					} else {
+						readErr = ErrBudgetExhausted
+					}
+				}
 			} else {
 				analysis.Escalated = true
 				reviewCtx, reviewCancel := context.WithTimeout(ctx, 12*time.Second)
@@ -98,6 +109,13 @@ func (a Analyzer) Analyze(ctx context.Context, uid uuid.UUID, photo []byte, mime
 				reviewLabel, validationErr := checkedRead(review)
 				if reviewErr == nil {
 					reviewErr = validationErr
+				}
+				if readErr != nil && reviewErr != nil {
+					if errors.Is(reviewErr, ErrUnreadable) {
+						readErr = reviewErr
+					} else {
+						readErr = errors.Join(ErrReviewUnavailable, reviewErr)
+					}
 				}
 				usage.CallType = "read_label_review"
 				if err := a.record(ctx, uid, usage, ai.EstimateCostUSD(usage), reviewErr); err != nil {
