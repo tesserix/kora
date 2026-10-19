@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
-import { ScrollView, useWindowDimensions, View } from "react-native";
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBackground } from "./AppBackground";
 import { Icon } from "./Icon";
@@ -46,7 +52,13 @@ export const HEADER_SCROLLS_ABOVE_FONT_SCALE = 1.3;
 // has no progress affordance, whereas this design keeps the title in the body.
 // The back control still matches ScreenHeader's conventions ("Go back",
 // selection haptic, arrow-left) so the two feel identical in use.
-export function AuthScaffold({ children, footer, header, onBack, progress }: Props) {
+export function AuthScaffold({
+  children,
+  footer,
+  header,
+  onBack,
+  progress,
+}: Props) {
   const { colors, instrument, spacing } = useTheme();
   const insets = useSafeAreaInsets();
   const { fontScale } = useWindowDimensions();
@@ -54,7 +66,8 @@ export function AuthScaffold({ children, footer, header, onBack, progress }: Pro
   // Gated on `header` as well as the scale so the sign-in path — which passes
   // no header — takes the identical branch at every content size. There is no
   // fontScale at which a headerless scaffold renders differently than it did.
-  const headerScrolls = Boolean(header) && fontScale > HEADER_SCROLLS_ABOVE_FONT_SCALE;
+  const headerScrolls =
+    Boolean(header) && fontScale > HEADER_SCROLLS_ABOVE_FONT_SCALE;
 
   // One element, two possible parents. Built once so the sticky and scrolling
   // arrangements cannot drift apart: same testID, same inset ownership, same
@@ -98,7 +111,12 @@ export function AuthScaffold({ children, footer, header, onBack, progress }: Pro
               haptic="selection"
               hitSlop={12}
               onPress={onBack}
-              style={{ minWidth: 44, minHeight: 44, justifyContent: "center", marginLeft: -6 }}
+              style={{
+                minWidth: 44,
+                minHeight: 44,
+                justifyContent: "center",
+                marginLeft: -6,
+              }}
             >
               <Icon name="arrow-left" size={22} color={colors.label} />
             </PressableScale>
@@ -131,47 +149,56 @@ export function AuthScaffold({ children, footer, header, onBack, progress }: Pro
 
       {headerScrolls ? null : headerBlock}
 
-      <ScrollView
-        testID="auth-scaffold-scroll"
+      {/* Lifts the sticky footer above the iOS keyboard; without it the keyboard
+          covered "Sign in" (lost when #604 dropped sign-in's own avoider).
+          iOS only: Android's windowSoftInputMode already resizes the window. */}
+      <KeyboardAvoidingView
+        testID="auth-scaffold-keyboard-avoider"
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1 }}
-        keyboardShouldPersistTaps="handled"
-        automaticallyAdjustKeyboardInsets
-        contentContainerStyle={{
-          flexGrow: 1,
-          // When the header scrolls it is the first child, and it still owns
-          // the top inset, so the content must not add one on top of it. The
-          // gap between it and the body is the container's own `gap`, which is
-          // the same spacing.md the sticky arrangement uses.
-          paddingTop: headerScrolls
-            ? hasNavRow
-              ? spacing.sm
-              : 0
-            : hasNavRow
-              ? spacing.sm
-              : header
-                ? spacing.md
-                : insets.top + spacing.xl,
-          paddingHorizontal: spacing.lg,
-          paddingBottom: spacing.lg,
-          gap: spacing.md,
-        }}
       >
-        {headerScrolls ? headerBlock : null}
-        {children}
-      </ScrollView>
+        <ScrollView
+          testID="auth-scaffold-scroll"
+          style={{ flex: 1 }}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets
+          contentContainerStyle={{
+            flexGrow: 1,
+            // When the header scrolls it is the first child, and it still owns
+            // the top inset, so the content must not add one on top of it. The
+            // gap between it and the body is the container's own `gap`, which is
+            // the same spacing.md the sticky arrangement uses.
+            paddingTop: headerScrolls
+              ? hasNavRow
+                ? spacing.sm
+                : 0
+              : hasNavRow
+                ? spacing.sm
+                : header
+                  ? spacing.md
+                  : insets.top + spacing.xl,
+            paddingHorizontal: spacing.lg,
+            paddingBottom: spacing.lg,
+            gap: spacing.md,
+          }}
+        >
+          {headerScrolls ? headerBlock : null}
+          {children}
+        </ScrollView>
 
-      <View
-        testID="auth-scaffold-footer"
-        style={{
-          paddingHorizontal: spacing.lg,
-          paddingTop: spacing.md,
-          paddingBottom: insets.bottom + spacing.md,
-          borderTopWidth: 1,
-          borderTopColor: colors.border,
-        }}
-      >
-        {footer}
-      </View>
+        <View
+          testID="auth-scaffold-footer"
+          style={{
+            paddingHorizontal: spacing.lg,
+            paddingTop: spacing.md,
+            paddingBottom: insets.bottom + spacing.md,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+          }}
+        >
+          {footer}
+        </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
