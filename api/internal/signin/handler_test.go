@@ -495,6 +495,9 @@ func (f *fakeZitadel) intent(idpID, linkedUser, email string, verified any) {
 	if verified != nil {
 		raw["email_verified"] = verified
 	}
+	if idpID == testGoogleIDP {
+		raw = map[string]any{"User": raw} // Zitadel's real Google shape
+	}
 	f.on("POST /v2/idp_intents/i-1", 200, map[string]any{
 		"userId": linkedUser,
 		"idpInformation": map[string]any{
