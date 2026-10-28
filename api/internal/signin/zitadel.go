@@ -669,6 +669,11 @@ func (z *zitadel) retrieveIntent(ctx context.Context, intentID, intentToken stri
 		return federatedIdentity{}, err
 	}
 	raw := wire.IDPInformation.RawInformation
+	// Zitadel's Google user embeds an interface, which JSON nests under "User";
+	// Apple's embeds a struct pointer, which stays flat.
+	if nested, ok := raw["User"].(map[string]any); ok {
+		raw = nested
+	}
 	email, verified := rawEmail(raw)
 	return federatedIdentity{
 		idpID:         wire.IDPInformation.IDPID,
