@@ -15,6 +15,13 @@
         "notes": "node-forge has no patched release; reached only through @expo/cli code-signing tooling, not the shipped app.",
         "expiry": "2026-12-31"
       }
+    },
+    {
+      "GHSA-mrhx-c7xc-m3w5": {
+        "active": true,
+        "notes": "zod 3.x has no patched release; reached only through @expo/cli build tooling, not the shipped app.",
+        "expiry": "2026-12-31"
+      }
     }
   ]
 }
