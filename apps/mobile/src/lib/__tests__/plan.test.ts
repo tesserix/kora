@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { availablePaces, computePlan, weeksToGoal, type PlanInput } from "../plan";
+import { availablePaces, computePlan, proteinFactor, weeksToGoal, type PlanInput } from "../plan";
 
 type GoldenCase = {
   name: string;
@@ -11,10 +11,12 @@ type GoldenCase = {
   activity_level: PlanInput["activityLevel"];
   goal: PlanInput["goal"];
   pace_kg_per_week: number;
+  goal_weight_kg?: number;
   bmr: number;
   tdee: number;
   kcal: number;
   protein_g: number;
+  protein_g_per_kg: number;
   carbs_g: number;
   fat_g: number;
   floored: boolean;
@@ -36,14 +38,31 @@ describe("computePlan matches the Go golden vectors", () => {
       activityLevel: c.activity_level,
       goal: c.goal,
       paceKgPerWeek: c.pace_kg_per_week,
+      goalWeightKg: c.goal_weight_kg,
     });
     expect(plan.bmr).toBeCloseTo(c.bmr, 6);
     expect(plan.tdee).toBeCloseTo(c.tdee, 6);
     expect(plan.kcal).toBeCloseTo(c.kcal, 6);
     expect(plan.proteinG).toBeCloseTo(c.protein_g, 6);
+    expect(plan.proteinGPerKg).toBeCloseTo(c.protein_g_per_kg, 6);
     expect(plan.carbsG).toBeCloseTo(c.carbs_g, 6);
     expect(plan.fatG).toBeCloseTo(c.fat_g, 6);
     expect(plan.floored).toBe(c.floored);
+  });
+});
+
+describe("proteinFactor", () => {
+  const levels = ["sedentary", "light", "moderate", "active", "very_active"] as const;
+  const table = {
+    fat_loss: [1.6, 1.6, 1.8, 1.8, 1.8],
+    maintenance: [1.2, 1.4, 1.6, 1.6, 1.6],
+    muscle_gain: [1.8, 1.8, 2.0, 2.0, 2.0],
+  } as const;
+  const cells = (Object.keys(table) as (keyof typeof table)[]).flatMap((goal) =>
+    levels.map((level, i) => [goal, level, table[goal][i]] as const),
+  );
+  it.each(cells)("%s / %s is %f g/kg", (goal, level, want) => {
+    expect(proteinFactor(goal, level)).toBe(want);
   });
 });
 

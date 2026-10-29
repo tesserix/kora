@@ -19,6 +19,8 @@ export type PlanInput = {
   activityLevel: ActivityLevel;
   goal: PlanGoal;
   paceKgPerWeek: number;
+  /** Reference weight for fat-loss protein; current weight is used when unset. */
+  goalWeightKg?: number;
 };
 
 export type Plan = {
@@ -27,6 +29,9 @@ export type Plan = {
   adjustment: number;
   kcal: number;
   proteinG: number;
+  proteinGPerKg: number;
+  /** The weight proteinG was computed against (goal weight for fat loss, else current). */
+  proteinRefKg: number;
   carbsG: number;
   fatG: number;
   /** True when the BMR floor bound — the target stopped obeying the user. */
@@ -41,12 +46,22 @@ export const ACTIVITY_FACTORS: Record<ActivityLevel, number> = {
   very_active: 1.9,
 };
 
+// g/kg of the reference weight, by goal then activity level (mirrors calc.go).
+const PROTEIN_FACTORS: Record<PlanGoal, Record<ActivityLevel, number>> = {
+  fat_loss: { sedentary: 1.6, light: 1.6, moderate: 1.8, active: 1.8, very_active: 1.8 },
+  maintenance: { sedentary: 1.2, light: 1.4, moderate: 1.6, active: 1.6, very_active: 1.6 },
+  muscle_gain: { sedentary: 1.8, light: 1.8, moderate: 2.0, active: 2.0, very_active: 2.0 },
+};
+
+export function proteinFactor(goal: PlanGoal, activity: ActivityLevel): number {
+  return PROTEIN_FACTORS[goal][activity];
+}
+
 export const PACE_OPTIONS = [0.25, 0.5, 0.75, 1] as const;
 
 const KCAL_PER_KG = 7700;
 const DAYS_PER_WEEK = 7;
 const MAX_PACE_FRACTION_OF_BODYWEIGHT = 0.01;
-const PROTEIN_G_PER_KG = 2.0;
 const FAT_CALORIE_PCT = 0.25;
 const KCAL_PER_GRAM_FAT = 9;
 const KCAL_PER_GRAM_MACRO = 4;
@@ -82,14 +97,19 @@ export function computePlan(input: PlanInput): Plan {
   const raw = tdee + adjustment;
   const kcal = Math.max(bmr, raw);
 
-  const proteinG = PROTEIN_G_PER_KG * input.weightKg;
+  const proteinRefKg =
+    input.goal === "fat_loss" && input.goalWeightKg && input.goalWeightKg > 0
+      ? input.goalWeightKg
+      : input.weightKg;
+  const proteinGPerKg = proteinFactor(input.goal, input.activityLevel);
+  const proteinG = proteinGPerKg * proteinRefKg;
   const fatG = (kcal * FAT_CALORIE_PCT) / KCAL_PER_GRAM_FAT;
   const carbsG = Math.max(
     0,
     (kcal - proteinG * KCAL_PER_GRAM_MACRO - fatG * KCAL_PER_GRAM_FAT) / KCAL_PER_GRAM_MACRO,
   );
 
-  return { bmr, tdee, adjustment, kcal, proteinG, carbsG, fatG, floored: kcal > raw };
+  return { bmr, tdee, adjustment, kcal, proteinG, proteinGPerKg, proteinRefKg, carbsG, fatG, floored: kcal > raw };
 }
 
 /**

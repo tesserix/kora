@@ -4,7 +4,7 @@
     "sex": "male", "age": 31, "height_cm": 178, "weight_kg": 84,
     "activity_level": "moderate", "goal": "fat_loss", "pace_kg_per_week": 0.5,
     "bmr": 1802.5, "tdee": 2793.875, "kcal": 2243.875,
-    "protein_g": 168, "carbs_g": 252.7265625, "fat_g": 62.329861111111114,
+    "protein_g": 151.2, "protein_g_per_kg": 1.8, "carbs_g": 269.52656249999995, "fat_g": 62.329861111111114,
     "floored": false
   },
   {
@@ -12,7 +12,7 @@
     "sex": "female", "age": 25, "height_cm": 165, "weight_kg": 65,
     "activity_level": "light", "goal": "maintenance", "pace_kg_per_week": 0.5,
     "bmr": 1395.25, "tdee": 1918.46875, "kcal": 1918.46875,
-    "protein_g": 130, "carbs_g": 229.712890625, "fat_g": 53.290798611111114,
+    "protein_g": 91.0, "protein_g_per_kg": 1.4, "carbs_g": 268.712890625, "fat_g": 53.290798611111114,
     "floored": false
   },
   {
@@ -20,7 +20,7 @@
     "sex": "male", "age": 22, "height_cm": 183, "weight_kg": 70,
     "activity_level": "active", "goal": "muscle_gain", "pace_kg_per_week": 0.25,
     "bmr": 1738.75, "tdee": 2999.34375, "kcal": 3274.34375,
-    "protein_g": 140, "carbs_g": 473.939453125, "fat_g": 90.95399305555556,
+    "protein_g": 140.0, "protein_g_per_kg": 2.0, "carbs_g": 473.939453125, "fat_g": 90.95399305555556,
     "floored": false
   },
   {
@@ -28,7 +28,7 @@
     "sex": "female", "age": 90, "height_cm": 150, "weight_kg": 40,
     "activity_level": "sedentary", "goal": "fat_loss", "pace_kg_per_week": 0.4,
     "bmr": 726.5, "tdee": 871.8, "kcal": 726.5,
-    "protein_g": 80, "carbs_g": 56.21875, "fat_g": 20.180555555555557,
+    "protein_g": 64.0, "protein_g_per_kg": 1.6, "carbs_g": 72.21875, "fat_g": 20.180555555555557,
     "floored": true
   },
   {
@@ -36,7 +36,23 @@
     "sex": "female", "age": 34, "height_cm": 170, "weight_kg": 62,
     "activity_level": "very_active", "goal": "fat_loss", "pace_kg_per_week": 0.25,
     "bmr": 1351.5, "tdee": 2567.85, "kcal": 2292.85,
-    "protein_g": 124, "carbs_g": 305.909375, "fat_g": 63.69027777777777,
+    "protein_g": 111.6, "protein_g_per_kg": 1.8, "carbs_g": 318.30937499999993, "fat_g": 63.69027777777777,
+    "floored": false
+  },
+  {
+    "name": "tester fat loss light uses goal weight",
+    "sex": "female", "age": 36, "height_cm": 160, "weight_kg": 73,
+    "activity_level": "light", "goal": "fat_loss", "pace_kg_per_week": 0.25, "goal_weight_kg": 68,
+    "bmr": 1389.0, "tdee": 1909.875, "kcal": 1634.875,
+    "protein_g": 108.8, "protein_g_per_kg": 1.6, "carbs_g": 197.7390625, "fat_g": 45.41319444444444,
+    "floored": false
+  },
+  {
+    "name": "tester fat loss moderate uses goal weight",
+    "sex": "female", "age": 36, "height_cm": 160, "weight_kg": 73,
+    "activity_level": "moderate", "goal": "fat_loss", "pace_kg_per_week": 0.5, "goal_weight_kg": 68,
+    "bmr": 1389.0, "tdee": 2152.9500000000003, "kcal": 1602.9500000000003,
+    "protein_g": 122.4, "protein_g_per_kg": 1.8, "carbs_g": 178.15312500000007, "fat_g": 44.526388888888896,
     "floored": false
   }
 ]

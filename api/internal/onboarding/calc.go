@@ -20,10 +20,17 @@ type Input struct {
 }
 
 type Targets struct {
+	Bmr      float64 `json:"bmr"`
+	Tdee     float64 `json:"tdee"`
 	Kcal     float64 `json:"kcal"`
 	ProteinG float64 `json:"protein_g"`
 	CarbsG   float64 `json:"carbs_g"`
 	FatG     float64 `json:"fat_g"`
+	// ProteinGPerKg and ProteinRefKg are the working behind ProteinG:
+	// grams per kilo of the reference weight (goal weight for fat loss
+	// when one is set, current weight otherwise).
+	ProteinGPerKg float64 `json:"protein_g_per_kg"`
+	ProteinRefKg  float64 `json:"protein_ref_kg"`
 	// Floored reports that the resting-burn clamp bound — the requested
 	// pace asked for a target below BMR and did not get it. Callers
 	// surface this to the user rather than silently showing a number
@@ -53,7 +60,6 @@ const (
 	bmrMaleOffset    = 5.0
 	bmrFemaleOffset  = -161.0
 	maxAgeYears      = 120
-	proteinGPerKg    = 2.0
 	fatCaloriePct    = 0.25
 	kcalPerGramFat   = 9.0
 	kcalPerGramMacro = 4.0 // protein and carbs
@@ -80,18 +86,30 @@ const (
 	maxPaceFractionOfBodyweight = 0.01
 )
 
-// SplitMacros divides a daily calorie target into grams of protein, carbs and
-// fat. Protein scales with bodyweight and fat takes a fixed share of energy,
-// so carbs absorb the remainder — which can go negative for a very low target
-// against a heavy body, hence the clamp.
-func SplitMacros(kcal, weightKg float64) (proteinG, carbsG, fatG float64) {
-	proteinG = proteinGPerKg * weightKg
+// proteinFactors is g/kg of the reference weight by goal then activity level.
+// Higher in a deficit to protect muscle; inside the 1.2-2.2 g/kg range
+// current guidance gives.
+var proteinFactors = map[string]map[string]float64{
+	"fat_loss":    {"sedentary": 1.6, "light": 1.6, "moderate": 1.8, "active": 1.8, "very_active": 1.8},
+	"maintenance": {"sedentary": 1.2, "light": 1.4, "moderate": 1.6, "active": 1.6, "very_active": 1.6},
+	"muscle_gain": {"sedentary": 1.8, "light": 1.8, "moderate": 2.0, "active": 2.0, "very_active": 2.0},
+}
+
+func proteinFactor(goal, activity string) float64 {
+	return proteinFactors[goal][activity]
+}
+
+// SplitMacros divides a daily calorie target into grams of carbs and fat
+// given the protein already chosen. Fat takes a fixed share of energy, so
+// carbs absorb the remainder — which can go negative for a very low target
+// against a heavy protein demand, hence the clamp.
+func SplitMacros(kcal, proteinG float64) (carbsG, fatG float64) {
 	fatG = (kcal * fatCaloriePct) / kcalPerGramFat
 	carbsG = (kcal - proteinG*kcalPerGramMacro - fatG*kcalPerGramFat) / kcalPerGramMacro
 	if carbsG < 0 {
 		carbsG = 0
 	}
-	return proteinG, carbsG, fatG
+	return carbsG, fatG
 }
 
 func Calculate(in Input, currentYear int) (Targets, error) {
@@ -177,6 +195,16 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 		floored = true
 	}
 
-	proteinG, carbsG, fatG := SplitMacros(kcal, in.WeightKg)
-	return Targets{Kcal: kcal, ProteinG: proteinG, CarbsG: carbsG, FatG: fatG, Floored: floored}, nil
+	refKg := in.WeightKg
+	if in.Goal == "fat_loss" && in.GoalWeightKg > 0 {
+		refKg = in.GoalWeightKg
+	}
+	perKg := proteinFactor(in.Goal, in.ActivityLevel)
+	proteinG := perKg * refKg
+	carbsG, fatG := SplitMacros(kcal, proteinG)
+	return Targets{
+		Bmr: bmr, Tdee: tdee, Kcal: kcal,
+		ProteinG: proteinG, CarbsG: carbsG, FatG: fatG,
+		ProteinGPerKg: perKg, ProteinRefKg: refKg, Floored: floored,
+	}, nil
 }

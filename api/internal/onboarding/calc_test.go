@@ -27,10 +27,12 @@ type goldenCase struct {
 	ActivityLevel string  `json:"activity_level"`
 	Goal          string  `json:"goal"`
 	PaceKgPerWeek float64 `json:"pace_kg_per_week"`
+	GoalWeightKg  float64 `json:"goal_weight_kg"`
 	Bmr           float64 `json:"bmr"`
 	Tdee          float64 `json:"tdee"`
 	Kcal          float64 `json:"kcal"`
 	ProteinG      float64 `json:"protein_g"`
+	ProteinGPerKg float64 `json:"protein_g_per_kg"`
 	CarbsG        float64 `json:"carbs_g"`
 	FatG          float64 `json:"fat_g"`
 	Floored       bool    `json:"floored"`
@@ -54,10 +56,12 @@ func TestCalculateMatchesGoldenVectors(t *testing.T) {
 				ActivityLevel: c.ActivityLevel,
 				Goal:          c.Goal,
 				PaceKgPerWeek: c.PaceKgPerWeek,
+				GoalWeightKg:  c.GoalWeightKg,
 			}, currentYear)
 			require.NoError(t, err)
 			approx(t, c.Kcal, got.Kcal, 0.001)
 			approx(t, c.ProteinG, got.ProteinG, 0.001)
+			approx(t, c.ProteinGPerKg, got.ProteinGPerKg, 0.0001)
 			approx(t, c.CarbsG, got.CarbsG, 0.001)
 			approx(t, c.FatG, got.FatG, 0.001)
 			require.Equal(t, c.Floored, got.Floored)
@@ -255,14 +259,55 @@ func TestCalculateRejectsGoalWeightContradictingGoal(t *testing.T) {
 // BMR, so it is exercised where it lives instead of through a contrived
 // whole-input case.
 func TestSplitMacrosClampsCarbsToZero(t *testing.T) {
-	// 100kg of protein demand (200g = 800kcal) against a 600kcal budget.
-	_, carbs, _ := SplitMacros(600, 100)
+	// 200g of protein (800kcal) against a 600kcal budget.
+	carbs, _ := SplitMacros(600, 200)
 	require.Equal(t, 0.0, carbs)
 }
 
 func TestSplitMacrosSplitsNormally(t *testing.T) {
-	protein, carbs, fat := SplitMacros(2000, 80)
-	approx(t, 160, protein, 0.001) // 2g/kg
+	carbs, fat := SplitMacros(2000, 160)
 	approx(t, 55.5555, fat, 0.001) // 25% of 2000 / 9
 	approx(t, 215, carbs, 0.001)   // (2000 - 640 - 500) / 4
+}
+
+func TestProteinFollowsGoalAndActivity(t *testing.T) {
+	want := map[string][5]float64{
+		"fat_loss":    {1.6, 1.6, 1.8, 1.8, 1.8},
+		"maintenance": {1.2, 1.4, 1.6, 1.6, 1.6},
+		"muscle_gain": {1.8, 1.8, 2.0, 2.0, 2.0},
+	}
+	levels := []string{"sedentary", "light", "moderate", "active", "very_active"}
+	for goal, row := range want {
+		for i, level := range levels {
+			require.Equal(t, row[i], proteinFactor(goal, level), "%s/%s", goal, level)
+		}
+	}
+}
+
+func fatLossTester(activity string, pace, goalKg float64) Input {
+	return Input{
+		Sex: "female", BirthYear: 1990, HeightCm: 160, WeightKg: 73,
+		ActivityLevel: activity, Goal: "fat_loss", PaceKgPerWeek: pace, GoalWeightKg: goalKg,
+	}
+}
+
+func TestFatLossProteinUsesGoalWeight(t *testing.T) {
+	got, err := Calculate(fatLossTester("light", 0.25, 68), 2026)
+	require.NoError(t, err)
+	approx(t, 108.8, got.ProteinG, 0.001)
+	approx(t, 1634.875, got.Kcal, 0.001)
+	require.Equal(t, 68.0, got.ProteinRefKg)
+	require.Equal(t, 1.6, got.ProteinGPerKg)
+
+	got, err = Calculate(fatLossTester("moderate", 0.5, 68), 2026)
+	require.NoError(t, err)
+	approx(t, 122.4, got.ProteinG, 0.001)
+	approx(t, 1602.95, got.Kcal, 0.001)
+}
+
+func TestFatLossWithoutGoalWeightUsesCurrentWeight(t *testing.T) {
+	got, err := Calculate(fatLossTester("light", 0.25, 0), 2026)
+	require.NoError(t, err)
+	approx(t, 116.8, got.ProteinG, 0.001)
+	require.Equal(t, 73.0, got.ProteinRefKg)
 }
