@@ -236,3 +236,21 @@ func TestPutPlanComparesAgainstLatestWeighIn(t *testing.T) {
 	require.Equal(t, 200, e.do(t, "PUT", "/v1/me/plan", planBody(71, "")).Code)
 	require.Equal(t, int64(2), e.weighInCount(t))
 }
+
+// A kcal override and a protein override can each be valid alone yet fail as a
+// pair: the protein share limit is taken against the effective kcal.
+func TestGetPlanDropsProteinOverrideThatFailsShareAgainstKcalOverride(t *testing.T) {
+	e := newPlanEnv(t)
+	// Extreme body so a protein figure fits the computed kcal (93) but not the
+	// kcal override (78, just over BMR 77.5).
+	body := `{"sex":"male","birth_year":1938,"height_cm":50,"weight_kg":20,` +
+		`"activity_level":"sedentary","goal":"maintenance"}`
+	require.Equal(t, 200, e.do(t, "POST", "/v1/onboarding", body).Code)
+	require.NoError(t, e.db.Exec(`UPDATE users SET target_kcal_override = 78, target_protein_override_g = 16.01 WHERE id = ?`, e.uid).Error)
+
+	p := e.getPlan(t)
+	require.NotNil(t, p.Data.OverrideError)
+	require.Equal(t, "protein_exceeds_share", *p.Data.OverrideError)
+	require.Equal(t, 78.0, p.Data.Targets.Kcal)
+	require.NotZero(t, p.Data.Targets.ProteinG)
+}

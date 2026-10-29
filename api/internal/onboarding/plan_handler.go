@@ -81,6 +81,19 @@ func (h Handler) GetPlan(c *gin.Context) {
 		}
 	}
 	targets, err := Calculate(calc, year)
+	// Each override passed alone but the pair can still fail (the protein share
+	// check uses the effective kcal): drop protein first, then kcal.
+	var oe *OverrideError
+	for _, drop := range []func(){func() { calc.ProteinOverrideG = nil }, func() { calc.KcalOverride = nil }} {
+		if !errors.As(err, &oe) {
+			break
+		}
+		if overrideErr == nil {
+			overrideErr = &oe.Code
+		}
+		drop()
+		targets, err = Calculate(calc, year)
+	}
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not compute plan")
 		return
@@ -126,10 +139,7 @@ func (h Handler) PutPlan(c *gin.Context) {
 	}
 	// Compare with the weight GET reports (latest weigh-in), not users.weight_kg,
 	// or the first save after any tracked weigh-in would log a duplicate.
-	prev, err := h.currentWeight(ctx, current)
-	if err != nil {
-		prev = current.WeightKg
-	}
+	prev, _ := h.currentWeight(ctx, current) // falls back to the profile weight on error
 	if d := in.WeightKg - prev; d >= weightChangeEpsilonKg || d <= -weightChangeEpsilonKg {
 		// Same isolation as Submit: the plan is saved, a failed weigh-in is logged.
 		h.recordWeighIn(ctx, userID, in.WeightKg, fields.Timezone, uuid.Nil)
