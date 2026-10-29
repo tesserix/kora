@@ -113,7 +113,10 @@ export default function PlanScreen() {
   };
 
   const pending = submit.isPending || save.isPending;
-  const blocked = pending || result.overrideError !== null || inputError !== null;
+  // Until the profile loads, onboarding mode can't tell POST from PUT, and a
+  // POST for an onboarded user would reset onboarded_at.
+  const profileUnknown = params.mode === "onboarding" && profile.data === undefined;
+  const blocked = pending || profileUnknown || result.overrideError !== null || inputError !== null;
 
   function onPrimary() {
     if (blocked) return;
@@ -207,7 +210,8 @@ export default function PlanScreen() {
       label: "Goal adjustment",
       value: `${result.adjustment >= 0 ? "+" : "−"}${Math.abs(Math.round(result.adjustment))} kcal`,
     },
-    { label: "Daily target", value: `${Math.round(result.kcal)} kcal` },
+    // The user's number is not the sum of Kora's working above it.
+    { label: result.kcalOverridden ? "Your target" : "Daily target", value: `${Math.round(result.kcal)} kcal` },
   ];
   const proteinBasis = `${result.proteinGPerKg} g/kg ${draft.goal === "fat_loss" && goalWeightKg ? "goal wt" : "body wt"}`;
   const errorText = { color: instrument.danger, fontSize: 13 } as const;

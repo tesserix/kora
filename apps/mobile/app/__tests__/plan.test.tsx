@@ -150,6 +150,7 @@ describe("plan page", () => {
     await fireEvent.press(screen.getByTestId("kcal-value"));
     await fireEvent.changeText(screen.getByTestId("kcal-input"), "2300");
     await typeProtein("150");
+    expect(screen.getByTestId("derivation-chain-row-3")).toHaveTextContent("Your target2300 kcal");
     await fireEvent.press(primary());
     expect(mockSave).not.toHaveBeenCalled();
     expect(mockSubmit).toHaveBeenCalledTimes(1);
@@ -180,6 +181,15 @@ describe("plan page", () => {
     await fireEvent.press(primary());
     expect(mockSubmit).not.toHaveBeenCalled();
     expect(mockSave).toHaveBeenCalledWith(DRAFT, expect.anything());
+  });
+
+  it("onboarding mode keeps the button disabled until the profile has loaded", async () => {
+    mockProfile = undefined;
+    await render(<Plan />);
+    expect(primary().props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(primary());
+    expect(mockSubmit).not.toHaveBeenCalled();
+    expect(mockSave).not.toHaveBeenCalled();
   });
 
   it("opened from Profile, loads usePlan and saves with PUT", async () => {
