@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen } from "@testing-library/react-native";
 import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
 import { instrumentDark, instrumentLight } from "@/theme/palette";
 
@@ -142,5 +142,22 @@ describe("SegmentedGlass label fitting (kora#288)", () => {
     // so the declared floor has to match what iOS does or the two platforms
     // diverge (one clips where the other shrinks).
     expect(label.props.minimumFontScale).toBeLessThanOrEqual(0.5);
+  });
+});
+
+// Onboarding starts with nothing pre-selected: a null value lights no segment
+// and draws every one as a dashed well, the "not answered yet" look.
+describe("SegmentedGlass unset state", () => {
+  it("SegmentedGlass with null value selects nothing", async () => {
+    const onChange = jest.fn();
+    await render(<SegmentedGlass options={SEX} value={null} onChange={onChange} />);
+    const tabs = screen.getAllByRole("tab");
+    for (const tab of tabs) {
+      expect(tab.props.accessibilityState).toEqual({ selected: false });
+      expect(flatten(tab.props.style).borderStyle).toBe("dashed");
+    }
+    // Nothing is selected, so any segment is a change worth reporting.
+    fireEvent.press(screen.getByText("Male"));
+    expect(onChange).toHaveBeenCalledWith("male");
   });
 });

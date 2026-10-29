@@ -258,3 +258,17 @@ func (r Repository) WeightSeries(ctx context.Context, userID uuid.UUID, from, to
 	}
 	return entries, nil
 }
+
+// LatestWeightKg returns the most recent weigh-in by logged_at; ok is false
+// when the user has none.
+func (r Repository) LatestWeightKg(ctx context.Context, userID uuid.UUID) (kg float64, ok bool, err error) {
+	var entries []WeightEntry
+	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).
+		Order("logged_at DESC").Limit(1).Find(&entries).Error; err != nil {
+		return 0, false, fmt.Errorf("tracking: latest weight: %w", err)
+	}
+	if len(entries) == 0 {
+		return 0, false, nil
+	}
+	return entries[0].WeightKg, true, nil
+}

@@ -11,6 +11,7 @@ import { PinnedStrip } from "@/components/home/PinnedStrip";
 import { YourUsualStrip } from "@/components/home/YourUsualStrip";
 import { MacroCell } from "@/components/home/MacroCell";
 import { CoachEntryCard } from "@/components/home/CoachEntryCard";
+import { PlanReviewCard } from "@/components/home/PlanReviewCard";
 import { EmptyState } from "@/components/common/EmptyState";
 import { AppBackground } from "@/components/AppBackground";
 import { PressableScale, ScreenEntrance, useMotionPrefs } from "@/motion";
@@ -380,6 +381,7 @@ export default function Home() {
           nudge={coachNudges.data?.nudges[0]}
           onPress={() => router.push("/coach")}
         />
+        <PlanReviewCard profile={profile.data} />
       </View>
 
       {/* meals */}

@@ -47,7 +47,10 @@ test("every gesture declares its worklet boundary", () => {
     if (!/\bGesture\.[A-Z]/.test(src)) continue;
 
     // Take each gesture builder chain up to the JSX/return that consumes it.
-    for (const chunk of src.split(/\bGesture\.[A-Z]/).slice(1)) {
+    for (const chunk of src.split(/\bGesture\.(?=[A-Z])/).slice(1)) {
+      // Race/Exclusive/Simultaneous only combine gestures that were already
+      // checked on their own; they carry no callbacks to run on either side.
+      if (/^(?:Race|Exclusive|Simultaneous)\(/.test(chunk)) continue;
       // Split only at OUTER-scope boundaries — a line indented two spaces or
       // less. Splitting on any `const` truncated the chain at `const next =`
       // *inside* Sheet's `.onChange`, hiding the `runOnJS` in its `.onEnd` and

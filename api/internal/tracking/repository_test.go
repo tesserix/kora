@@ -417,3 +417,24 @@ func TestEverySourceConstantSatisfiesTheCheckConstraint(t *testing.T) {
 		require.NoError(t, err, "source %q is in Sources but rejected on write", src)
 	}
 }
+
+func TestLatestWeightKg(t *testing.T) {
+	db := testDB(t)
+	userID := seedUser(t, db)
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	_, ok, err := repo.LatestWeightKg(ctx, userID)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	d1 := time.Date(2026, 3, 1, 8, 0, 0, 0, time.UTC)
+	d2 := time.Date(2026, 3, 3, 8, 0, 0, 0, time.UTC)
+	_, _ = repo.AddWeight(ctx, userID, 73.0, d2, dayOf(d2)) // newest, inserted first
+	_, _ = repo.AddWeight(ctx, userID, 74.0, d1, dayOf(d1))
+
+	kg, ok, err := repo.LatestWeightKg(ctx, userID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, 73.0, kg)
+}

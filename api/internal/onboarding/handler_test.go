@@ -215,6 +215,10 @@ func (erroringWeightRecorder) AddWeightEntry(context.Context, uuid.UUID, trackin
 	return tracking.WeightEntry{}, errors.New("boom")
 }
 
+func (erroringWeightRecorder) LatestWeightKg(context.Context, uuid.UUID) (float64, bool, error) {
+	return 0, false, errors.New("boom")
+}
+
 // TestSubmitRecordsFirstWeighIn is the core kora#45 behaviour: onboarding's
 // stated weight becomes a real weight_entries row, not just profile.weight_kg.
 func TestSubmitRecordsFirstWeighIn(t *testing.T) {
@@ -377,4 +381,51 @@ func TestSubmitIgnoresClientSuppliedTargetDate(t *testing.T) {
 	require.NotNil(t, saved.TargetDate)
 	require.NotEqual(t, "2020-01-01", saved.TargetDate.Format("2006-01-02"))
 	require.Equal(t, "2026-11-04", saved.TargetDate.Format("2006-01-02"))
+}
+
+func TestSubmitStoresOverrides(t *testing.T) {
+	body := `{"sex":"male","birth_year":1995,"height_cm":178,"weight_kg":84,` +
+		`"activity_level":"moderate","goal":"maintenance","target_protein_override_g":125}`
+
+	saved := submitOnboarding(t, body)
+
+	require.Equal(t, 125.0, saved.TargetProteinG)
+	require.NotNil(t, saved.TargetProteinOverrideG)
+	require.Equal(t, 125.0, *saved.TargetProteinOverrideG)
+	require.Nil(t, saved.TargetKcalOverride)
+}
+
+func TestSubmitRejectsOutOfRangeOverride(t *testing.T) {
+	db := handlerTestDB(t)
+	fuid := uuid.NewString()
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", fuid) })
+	userRepo := user.NewRepository(db)
+	_, err := userRepo.UpsertBySubject(t.Context(), fuid, fuid+"@test.dev")
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := Handler{users: userRepo, now: func() time.Time { return referenceNow(t) }}
+	r.POST("/v1/onboarding", withUID(fuid), user.ResolveMiddleware(userRepo), h.Submit)
+
+	body := `{"sex":"female","birth_year":1990,"height_cm":165,"weight_kg":65,` +
+		`"activity_level":"light","goal":"maintenance","target_kcal_override":500}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/v1/onboarding", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"invalid_override"`)
+	require.Contains(t, w.Body.String(), "kcal_below_resting_burn")
+}
+
+func TestSubmitSetsBasisWeightAndPlanSavedAt(t *testing.T) {
+	body := `{"sex":"male","birth_year":1995,"height_cm":178,"weight_kg":84,` +
+		`"activity_level":"moderate","goal":"maintenance"}`
+
+	saved := submitOnboarding(t, body)
+
+	require.Equal(t, 84.0, saved.PlanBasisWeightKg)
+	require.NotNil(t, saved.PlanSavedAt)
 }

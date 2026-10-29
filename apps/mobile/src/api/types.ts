@@ -1,3 +1,5 @@
+import type { OverrideCode } from "@/lib/plan";
+
 export type Profile = {
   id: string;
   email: string;
@@ -27,6 +29,11 @@ export type Profile = {
    * a broken URL.
    */
   avatar_url: string;
+  /** Plan page (GET/PUT /v1/me/plan). Overrides are null when the user has none. */
+  target_kcal_override: number | null;
+  target_protein_override_g: number | null;
+  plan_basis_weight_kg: number;
+  plan_saved_at: string | null;
 };
 
 export interface AIQuotaWindow {
@@ -601,6 +608,47 @@ export type OnboardingInput = {
   goal: "fat_loss" | "maintenance" | "muscle_gain";
   goal_weight_kg?: number;
   pace_kg_per_week?: number;
+  // Omitting an override clears it on PUT /v1/me/plan.
+  target_kcal_override?: number | null;
+  target_protein_override_g?: number | null;
+};
+
+/** Same keys as the POST /v1/onboarding body; weight_kg is the latest weigh-in. */
+export type PlanInputs = {
+  sex: "male" | "female";
+  birth_year: number;
+  height_cm: number;
+  weight_kg: number;
+  activity_level: OnboardingInput["activity_level"];
+  goal: OnboardingInput["goal"];
+  timezone: string;
+  goal_weight_kg: number | null;
+  pace_kg_per_week: number | null;
+  target_kcal_override: number | null;
+  target_protein_override_g: number | null;
+};
+
+export type PlanTargets = {
+  bmr: number;
+  tdee: number;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  floored: boolean;
+  protein_g_per_kg: number;
+  protein_ref_kg: number;
+  kcal_overridden: boolean;
+  protein_overridden: boolean;
+};
+
+export type PlanResponse = {
+  inputs: PlanInputs;
+  targets: PlanTargets;
+  /** A stored override that fails validation is still echoed in inputs; clear or edit it before PUT. */
+  override_error: OverrideCode | null;
+  /** Set when the latest weigh-in invalidates the stored goal weight or pace; targets then ignore them. */
+  input_error: string | null;
 };
 
 /**

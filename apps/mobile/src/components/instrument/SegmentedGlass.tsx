@@ -7,7 +7,9 @@ export type SegmentedGlassOption = { key: string; label: string };
 
 type Props = {
   options: SegmentedGlassOption[];
-  value: string;
+  // null = nothing chosen yet (onboarding): no segment is lit, and every one
+  // is drawn as a dashed well, the "not answered yet" look from the mockup.
+  value: string | null;
   onChange: (key: string) => void;
   testID?: string;
 };
@@ -84,6 +86,7 @@ export function SegmentedGlass({ options, value, onChange, testID = "segmented-g
     >
       {options.map((opt) => {
         const selected = opt.key === value;
+        const unset = value === null;
         return (
           <PressableScale
             key={opt.key}
@@ -123,13 +126,20 @@ export function SegmentedGlass({ options, value, onChange, testID = "segmented-g
               borderRadius: 9,
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: selected ? instrument.ink : "transparent",
+              backgroundColor: selected ? instrument.ink : unset ? instrument.inset : "transparent",
               // The border is drawn on every segment, selected or not, so the
               // pill cannot change the row's metrics as it moves — a hairline
               // appearing on selection shifts the label by half a point and
               // makes the whole control twitch.
-              borderWidth: StyleSheet.hairlineWidth,
-              borderColor: selected ? instrument.ink : "transparent",
+              //
+              // Unset swaps in a full-point dashed rim: a hairline dash barely
+              // renders. Every segment changes together on the first pick, so
+              // that one shift moves the whole row and none twitches against
+              // its neighbour. glassBorder, not accent: the one orange is not
+              // spent on a blank (Ignition accent budget).
+              borderWidth: unset ? 1 : StyleSheet.hairlineWidth,
+              borderStyle: unset ? "dashed" : undefined,
+              borderColor: selected ? instrument.ink : unset ? instrument.glassBorder : "transparent",
             }}
           >
             <AppText

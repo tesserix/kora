@@ -68,6 +68,12 @@ type User struct {
 	TargetFatG     float64    `json:"target_fat_g"`
 	OnboardedAt    *time.Time `json:"onboarded_at"`
 
+	// Plan overrides. Nil means "use the computed target".
+	TargetKcalOverride     *float64   `json:"target_kcal_override"`
+	TargetProteinOverrideG *float64   `json:"target_protein_override_g"`
+	PlanBasisWeightKg      float64    `json:"plan_basis_weight_kg"`
+	PlanSavedAt            *time.Time `json:"plan_saved_at"`
+
 	// Destination. Nil/zero means none was set — which is what a
 	// maintenance user stores, not an error state.
 	GoalWeightKg  float64    `json:"goal_weight_kg"`

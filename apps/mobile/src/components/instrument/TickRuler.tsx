@@ -6,7 +6,12 @@ import {
   type LayoutChangeEvent,
   type AccessibilityActionEvent,
 } from "react-native";
-import { Gesture, GestureDetector, type PanGesture } from "react-native-gesture-handler";
+import {
+  Gesture,
+  GestureDetector,
+  type ComposedGesture,
+  type TapGesture,
+} from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
   useAnimatedProps,
@@ -49,7 +54,6 @@ const FALLBACK_WIDTH = Dimensions.get("window").width;
 // one.
 export type ContinuousProps = {
   mode: "continuous";
-  value: number;
   min: number;
   max: number;
   step: number;
@@ -62,9 +66,19 @@ export type ContinuousProps = {
    * metric. Omitted when `formatLabel` already carries the unit (ft/in).
    */
   unit?: string;
+  /** Face text while `value` is null. */
+  unsetLabel?: string;
   accessibilityLabel: string;
   testID?: string;
-};
+} & (
+  | { value: number; restValue?: undefined }
+  // Unset (onboarding opens with nothing chosen): the ticks rest at `restValue`
+  // but no numeral is drawn, and a tap commits it. A second arm rather than a
+  // runtime default so a null value without somewhere to rest is a type error.
+  // `number | null`, not `null`, so a screen can pass its `number | null`
+  // state straight through alongside a restValue.
+  | { value: number | null; restValue: number }
+);
 
 /**
  * The one string both the readout and (minus the unit) the accessibility
@@ -87,12 +101,15 @@ export function formatReadout(
 // rounds and clamps before calling `onChange`.
 export type DetentedProps = {
   mode: "detented";
-  index: number;
   labels: readonly string[];
   onChange: (index: number) => void;
   accessibilityLabel: string;
   testID?: string;
-};
+} & (
+  | { index: number; restIndex?: undefined }
+  // Unset: same contract as continuous mode's `restValue`.
+  | { index: number | null; restIndex: number }
+);
 
 export type TickRulerProps = ContinuousProps | DetentedProps;
 
@@ -124,6 +141,8 @@ const RUBBER_BAND_COEFFICIENT = 0.55;
 // scrolls nothing and the page reads as frozen.
 const ACTIVE_OFFSET_X = 10;
 const FAIL_OFFSET_Y = 15;
+// How long an unset ruler's tap may be held and still commit (see useUnsetTap).
+const UNSET_TAP_MAX_MS = 5000;
 
 // --- Dynamic Type for the SVG scale labels (kora#261) -----------------------
 //
@@ -402,6 +421,46 @@ export function indexFromDrag(startIndex: number, translationX: number, stopCoun
 }
 
 /**
+ * The unset ruler's tap (kora#164): a tap never activates the Pan, so without
+ * this a ruler could only be set by dragging it. Disabled once set, so a set
+ * ruler's touch handling is the Pan alone.
+ *
+ * Its own hook rather than a memo inside useDragReport: there, the
+ * react-hooks/refs lint misreads `report` (which reads refs) as being called
+ * during render as soon as a second gesture closes over it.
+ *
+ * Reports where the scale SITS (`offset`, read on the UI thread), never a
+ * value captured at render: closing over the value would rebuild the gesture
+ * on every step of a set ruler's drag and re-attach its handlers mid-drag
+ * (kora#176). While unset the offset is the rest position.
+ */
+function useUnsetTap(
+  testID: string,
+  unset: boolean,
+  offset: SharedValue<number>,
+  compute: (start: number, translationX: number) => number,
+  report: (next: number) => void,
+): TapGesture {
+  return useMemo(
+    () =>
+      Gesture.Tap()
+        .withTestId(`${testID}-tap`)
+        .enabled(unset)
+        // A finger that travels far enough to be a drag or a scroll is not a tap.
+        .maxDistance(ACTIVE_OFFSET_X)
+        // RNGH fails a tap held past 500ms by default, so a slow, deliberate
+        // press would set nothing: the kora#164 trap again. Movement, not
+        // time, is what separates a tap from a drag here.
+        .maxDuration(UNSET_TAP_MAX_MS)
+        .onEnd((_e, success) => {
+          "worklet";
+          if (success) runOnJS(report)(compute(offset.value, 0));
+        }),
+    [compute, offset, report, testID, unset],
+  );
+}
+
+/**
  * The drag machinery both ruler modes share. Kept in one place because it
  * carries the subtle part: the gesture must never close over the current
  * value, and must compute an absolute position from a start captured once
@@ -427,9 +486,15 @@ export function indexFromDrag(startIndex: number, translationX: number, stopCoun
  * detented), and the end is the one place on this control where a haptic
  * genuinely earns its keep — the value stops moving there, and without a
  * distinct feel it just goes silent, which reads as the control breaking.
+ *
+ * `current` is null while the ruler is unset. The scale then rests at `rest`,
+ * and ANY touch commits: a pan end reports even at zero translation, and a tap
+ * (which never activates the Pan, see ACTIVE_OFFSET_X) reports `rest` itself.
+ * kora#164: an unset ruler that a tap could not set left people stuck.
  */
 function useDragReport({
   current,
+  rest,
   testID,
   compute,
   atBound,
@@ -439,7 +504,8 @@ function useDragReport({
   hi,
   width,
 }: {
-  current: number;
+  current: number | null;
+  rest: number;
   testID: string;
   compute: (start: number, translationX: number) => number;
   atBound: (value: number) => boolean;
@@ -448,7 +514,7 @@ function useDragReport({
   lo: number;
   hi: number;
   width: number;
-}): { pan: PanGesture; report: (next: number) => void; offset: SharedValue<number> } {
+}): { gesture: ComposedGesture; report: (next: number) => void; offset: SharedValue<number> } {
   // `current` is a JS-thread closure that only refreshes after React
   // re-renders. currentRef always holds the latest so the haptic decisions
   // below never read a stale one.
@@ -462,7 +528,7 @@ function useDragReport({
   // starting value so a ruler that opens already pinned to min/max does not
   // thump on the first frame of the first drag.
   const lastHapticAt = useRef(0);
-  const wasAtBound = useRef(atBound(current));
+  const wasAtBound = useRef(atBound(current ?? rest));
   // The last value this control itself put on the wire. The parent echoes
   // every reported value straight back as a new `current`, and the sync
   // effect below has to be able to tell that echo apart from a value changed
@@ -504,13 +570,14 @@ function useDragReport({
   );
 
   // The live scale position driving the ticks, in scale units.
-  const offset = useSharedValue(current);
+  const offset = useSharedValue(current ?? rest);
   // The position the current gesture started from, captured once per gesture
   // so every update computes an absolute position from cumulative translation.
-  const dragStart = useSharedValue(current);
+  const dragStart = useSharedValue(current ?? rest);
   // The last value handed to `report`, tracked on the UI thread so the
   // crossing into a new step — not every frame — is what wakes the JS thread.
-  const lastSnapped = useSharedValue(current);
+  const lastSnapped = useSharedValue(current ?? rest);
+  const unset = current === null;
 
   // Adopt a value that changed from OUTSIDE this control — the accessibility
   // increment/decrement actions, or a parent that rejected what we reported.
@@ -518,8 +585,10 @@ function useDragReport({
   // frame of a drag, and adopting it would snap the scale to the last whole
   // step and cancel the rubber-band the finger is currently stretching.
   useEffect(() => {
-    if (current !== lastReportedRef.current) offset.value = current;
-  }, [current, offset]);
+    // Unset, there is no echo to tell apart (null === null), so a moved rest
+    // point (a kg/lb toggle) must always move the scale.
+    if (current === null || current !== lastReportedRef.current) offset.value = current ?? rest;
+  }, [current, offset, rest]);
 
   const pan = useMemo(
     () =>
@@ -538,7 +607,9 @@ function useDragReport({
         .onBegin(() => {
           "worklet";
           dragStart.value = offset.value;
-          lastSnapped.value = compute(offset.value, 0);
+          // Unset, nothing has been reported yet, so even the rest position is
+          // news: NaN equals nothing, so the first update or the end reports.
+          lastSnapped.value = unset ? NaN : compute(offset.value, 0);
         })
         .onUpdate((e) => {
           "worklet";
@@ -577,15 +648,54 @@ function useDragReport({
             runOnJS(report)(target);
           }
         }),
-    [compute, dragStart, hi, lastSnapped, lo, offset, pxPerUnit, report, testID, width],
+    [compute, dragStart, hi, lastSnapped, lo, offset, pxPerUnit, report, testID, unset, width],
   );
 
-  return { pan, report, offset };
+  const tap = useUnsetTap(testID, unset, offset, compute, report);
+
+  // Race: whichever claims the touch first cancels the other, so a drag never
+  // also fires the tap and a tap costs no extra delay.
+  const gesture = useMemo(() => Gesture.Race(pan, tap), [pan, tap]);
+
+  return { gesture, report, offset };
+}
+
+/**
+ * The "not answered yet" face for an unset ruler: a recessed well with a dashed
+ * rim, matching the onboarding mockup and SegmentedGlass's unset segments.
+ * Absolutely positioned behind the scale so it adds nothing to the layout, and
+ * deliberately no accent: onboarding's one orange is not spent on a blank.
+ */
+function UnsetWell({ testID }: { testID: string }) {
+  const { instrument } = useTheme();
+  return (
+    <View
+      testID={`${testID}-unset-well`}
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderStyle: "dashed",
+        borderColor: instrument.glassBorder,
+        backgroundColor: instrument.inset,
+      }}
+    />
+  );
 }
 
 function ContinuousRuler(props: ContinuousProps) {
   const { instrument } = useTheme();
   const { value, min, max, step, onChange, formatLabel, unit, accessibilityLabel } = props;
+  const { unsetLabel = "Slide to set" } = props;
+  // Where the scale sits and adjustments start from: the value, or the rest
+  // position while unset.
+  // (Branching on restValue is what lets TypeScript narrow the union.)
+  const rest = props.restValue === undefined ? props.value : (props.value ?? props.restValue);
   const testID = props.testID ?? "tick-ruler";
   const [width, setWidth] = useState(FALLBACK_WIDTH);
   // useWindowDimensions, not PixelRatio.getFontScale(): the former is reactive,
@@ -616,8 +726,9 @@ function ContinuousRuler(props: ContinuousProps) {
 
   const atBound = useCallback((v: number) => v <= min || v >= max, [max, min]);
 
-  const { pan, report, offset } = useDragReport({
+  const { gesture, report, offset } = useDragReport({
     current: value,
+    rest,
     testID,
     compute,
     atBound,
@@ -631,10 +742,10 @@ function ContinuousRuler(props: ContinuousProps) {
   const onAccessibilityAction = useCallback(
     (e: AccessibilityActionEvent) => {
       const { actionName } = e.nativeEvent;
-      if (actionName === "increment") report(snap(value + step, min, max, step));
-      if (actionName === "decrement") report(snap(value - step, min, max, step));
+      if (actionName === "increment") report(snap(rest + step, min, max, step));
+      if (actionName === "decrement") report(snap(rest - step, min, max, step));
     },
-    [max, min, report, step, value],
+    [max, min, report, rest, step],
   );
 
   const mid = width / 2;
@@ -698,14 +809,16 @@ function ContinuousRuler(props: ContinuousProps) {
   const fadeStop = continuousFadeStop(labelSize, width);
 
   return (
-    <GestureDetector gesture={pan}>
+    <GestureDetector gesture={gesture}>
       <View
         testID={testID}
         onLayout={onLayout}
         accessible
         accessibilityRole="adjustable"
         accessibilityLabel={accessibilityLabel}
-        accessibilityValue={{ text: formatLabel ? formatLabel(value) : String(value) }}
+        accessibilityValue={{
+          text: value === null ? "Not set" : formatLabel ? formatLabel(value) : String(value),
+        }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={onAccessibilityAction}
         // minHeight, NOT height (kora#173) — the same correction the readout
@@ -726,6 +839,7 @@ function ContinuousRuler(props: ContinuousProps) {
         // viewport on each side so the end labels are not cut in half.
         style={{ minHeight: svgHeight + READOUT_HEIGHT, width: "100%", overflow: "hidden" }}
       >
+        {value === null && <UnsetWell testID={testID} />}
         {/* kora#165: the value in plain sight. A real RN Text rather than an
             SVG one so it inherits the app's type scale and Dynamic Type, and
             it sits INSIDE the `accessible` wrapper above — which collapses
@@ -749,10 +863,12 @@ function ContinuousRuler(props: ContinuousProps) {
             fontSize: 15,
             fontWeight: "700",
             letterSpacing: 0.4,
-            color: instrument.ink,
+            color: value === null ? instrument.mut : instrument.ink,
           }}
         >
-          {formatReadout(value, formatLabel, unit)}
+          {/* kora#164: unset shows an instruction, never a number that looks
+              chosen but does not count. */}
+          {value === null ? unsetLabel : formatReadout(value, formatLabel, unit)}
         </AppText>
         <View style={{ height: svgHeight }}>
           <Animated.View style={[{ width: scaleWidth, height: svgHeight }, scaleStyle]}>
@@ -802,19 +918,22 @@ function ContinuousRuler(props: ContinuousProps) {
                   stroke={instrument.ink}
                   strokeWidth={1.6}
                 />
-                {labels.map((t) => (
-                  <SvgText
-                    key={`label-${t.key}`}
-                    testID={`${testID}-label-${t.key}`}
-                    x={t.x}
-                    y={baseline - 22}
-                    fill={instrument.mut}
-                    fontSize={labelSize}
-                    textAnchor="middle"
-                  >
-                    {t.text}
-                  </SvgText>
-                ))}
+                {/* No numerals while unset: the graduation under the index would
+                    read as the value (kora#164). */}
+                {value !== null &&
+                  labels.map((t) => (
+                    <SvgText
+                      key={`label-${t.key}`}
+                      testID={`${testID}-label-${t.key}`}
+                      x={t.x}
+                      y={baseline - 22}
+                      fill={instrument.mut}
+                      fontSize={labelSize}
+                      textAnchor="middle"
+                    >
+                      {t.text}
+                    </SvgText>
+                  ))}
               </G>
             </Svg>
           </Animated.View>
@@ -832,7 +951,7 @@ function ContinuousRuler(props: ContinuousProps) {
               y1={baseline + 4}
               x2={mid}
               y2={baseline - 24}
-              stroke={instrument.accent}
+              stroke={value === null ? instrument.mut : instrument.accent}
               strokeWidth={2}
             />
           </Svg>
@@ -845,6 +964,7 @@ function ContinuousRuler(props: ContinuousProps) {
 function DetentedRuler(props: DetentedProps) {
   const { instrument } = useTheme();
   const { index, labels, onChange, accessibilityLabel } = props;
+  const rest = props.restIndex === undefined ? props.index : (props.index ?? props.restIndex);
   const testID = props.testID ?? "tick-ruler";
   const [width, setWidth] = useState(FALLBACK_WIDTH);
   // Same reactive source as continuous mode above (kora#261). Unlike that
@@ -867,8 +987,9 @@ function DetentedRuler(props: DetentedProps) {
 
   const atBound = useCallback((i: number) => i <= 0 || i >= labels.length - 1, [labels.length]);
 
-  const { pan, report, offset } = useDragReport({
+  const { gesture, report, offset } = useDragReport({
     current: index,
+    rest,
     testID,
     compute,
     atBound,
@@ -885,17 +1006,17 @@ function DetentedRuler(props: DetentedProps) {
       // would reach the plan formula as an invalid activity level, so
       // increment/decrement clamp to a whole stop before reporting, exactly
       // as `indexFromDrag` clamps a dragged position.
-      if (e.nativeEvent.actionName === "increment") report(clamp(index + 1, 0, labels.length - 1));
-      if (e.nativeEvent.actionName === "decrement") report(clamp(index - 1, 0, labels.length - 1));
+      if (e.nativeEvent.actionName === "increment") report(clamp(rest + 1, 0, labels.length - 1));
+      if (e.nativeEvent.actionName === "decrement") report(clamp(rest - 1, 0, labels.length - 1));
     },
-    [index, labels.length, report],
+    [labels.length, report, rest],
   );
 
   const mid = width / 2;
   // Same reason as continuous mode's `pad`: the first and last stops' labels
   // are centred on their tick, so without a margin the SVG clips half of each.
-  // The first stop is SELECTED by default on every detented ruler in
-  // onboarding, so this was visible immediately ("Lose weight" -> "veight").
+  // A detented ruler often sits on its first stop, so this shows at once
+  // ("Lose weight" -> "veight").
   const pad = width;
   const scaleWidth = Math.max(1, (labels.length - 1) * DETENT_PX) + pad * 2;
 
@@ -916,18 +1037,19 @@ function DetentedRuler(props: DetentedProps) {
   const fadeStop = detentFadeStop(labelSize, width);
 
   return (
-    <GestureDetector gesture={pan}>
+    <GestureDetector gesture={gesture}>
       <View
         testID={testID}
         onLayout={onLayout}
         accessible
         accessibilityRole="adjustable"
         accessibilityLabel={accessibilityLabel}
-        accessibilityValue={{ text: labels[index] }}
+        accessibilityValue={{ text: index === null ? "Not set" : labels[index] }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={onAccessibilityAction}
         style={{ height: HEIGHT + 8, width: "100%", overflow: "hidden" }}
       >
+        {index === null && <UnsetWell testID={testID} />}
         <Animated.View style={[{ width: scaleWidth, height: HEIGHT + 8 }, scaleStyle]}>
           <Svg width={scaleWidth} height={HEIGHT + 8}>
             <Defs>
@@ -1007,7 +1129,7 @@ function DetentedRuler(props: DetentedProps) {
             y1={BASELINE + 12}
             x2={mid}
             y2={BASELINE - 10}
-            stroke={instrument.accent}
+            stroke={index === null ? instrument.mut : instrument.accent}
             strokeWidth={2}
           />
         </Svg>

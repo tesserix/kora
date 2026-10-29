@@ -66,6 +66,8 @@ import {
   useResolveVoice,
   useSavedMeals,
   useSendFriendRequest,
+  usePlan,
+  useSavePlan,
   useSubmitOnboarding,
   useUnfriend,
   useUnreadCount,
@@ -1365,6 +1367,7 @@ test("useCreateLogBatch posts to /v1/logs/batch", async () => {
 test("useSubmitOnboarding replaces the cached profile with the onboarded one", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["profile"], { id: "u1", email: "a@b.c", goal: "", onboarded_at: null });
+  client.setQueryData(["dashboard"], { stale: true });
 
   const onboarded = {
     id: "u1",
@@ -1390,6 +1393,49 @@ test("useSubmitOnboarding replaces the cached profile with the onboarded one", a
   });
 
   await waitFor(() => expect(client.getQueryData(["profile"])).toEqual(onboarded));
+  // Home's gauge reads /v1/dashboard, which carries the target.
+  expect(client.getQueryState(["dashboard"])?.isInvalidated).toBe(true);
+});
+
+test("usePlan GETs /v1/me/plan", async () => {
+  const plan = { inputs: {}, targets: {}, override_error: null, input_error: null };
+  (apiFetch as jest.Mock).mockResolvedValueOnce(plan);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { result } = await renderHook(() => usePlan(), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+  await waitFor(() => expect(result.current.data).toEqual(plan));
+  expect(apiFetch).toHaveBeenCalledWith("/v1/me/plan");
+});
+
+test("useSavePlan PUTs the body, seeds the profile and invalidates the plan and dashboard", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["profile"], { id: "u1", target_kcal: 2000 });
+  client.setQueryData(["plan"], { stale: true });
+  client.setQueryData(["dashboard"], { stale: true });
+  const saved = { id: "u1", target_kcal: 1800, target_kcal_override: 1800 };
+  (apiFetch as jest.Mock).mockResolvedValueOnce(saved);
+  const input = {
+    sex: "male" as const,
+    birth_year: 1990,
+    height_cm: 180,
+    weight_kg: 78,
+    activity_level: "moderate" as const,
+    goal: "maintenance" as const,
+    target_kcal_override: 1800,
+  };
+  const { result } = await renderHook(() => useSavePlan(), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+  await result.current.mutateAsync(input);
+  expect(apiFetch).toHaveBeenCalledWith("/v1/me/plan", { method: "PUT", body: JSON.stringify(input) });
+  expect(client.getQueryData(["profile"])).toEqual(saved);
+  expect(client.getQueryState(["plan"])?.isInvalidated).toBe(true);
+  expect(client.getQueryState(["dashboard"])?.isInvalidated).toBe(true);
 });
 
 // usePins/useSavedMeals are the only two read hooks with a nested food
