@@ -207,3 +207,42 @@ func TestEnsureUserOverLongNameWritesNothing(t *testing.T) {
 	require.NoError(t, db.Where("idp_subject = ?", fuid).First(&stored).Error)
 	require.Empty(t, stored.DisplayName)
 }
+
+func TestSavePlanKeepsOnboardedAt(t *testing.T) {
+	db := idTestDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", "plan-keep-uid") })
+	u, err := repo.UpsertBySubject(ctx, "plan-keep-uid", "plan@test.dev")
+	require.NoError(t, err)
+
+	f := OnboardingFields{Sex: "male", BirthYear: 1990, HeightCm: 180, WeightKg: 80, Timezone: "UTC", PlanBasisWeightKg: 80}
+	onboarded, err := repo.SaveOnboarding(ctx, u.ID, f)
+	require.NoError(t, err)
+	require.NotNil(t, onboarded.OnboardedAt)
+	require.NotNil(t, onboarded.PlanSavedAt)
+
+	k := 2100.0
+	f.TargetKcalOverride = &k
+	saved, err := repo.SavePlan(ctx, u.ID, f)
+	require.NoError(t, err)
+	require.True(t, onboarded.OnboardedAt.Equal(*saved.OnboardedAt))
+	require.NotNil(t, saved.PlanSavedAt)
+	require.False(t, saved.PlanSavedAt.Before(*onboarded.PlanSavedAt))
+	require.Equal(t, 2100.0, *saved.TargetKcalOverride)
+}
+
+func TestSaveOnboardingWritesOverridesAndBasis(t *testing.T) {
+	db := idTestDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+	t.Cleanup(func() { db.Exec("DELETE FROM users WHERE idp_subject = ?", "plan-ovr-uid") })
+	u, err := repo.UpsertBySubject(ctx, "plan-ovr-uid", "ovr@test.dev")
+	require.NoError(t, err)
+
+	got, err := repo.SaveOnboarding(ctx, u.ID, OnboardingFields{Timezone: "UTC", PlanBasisWeightKg: 125})
+	require.NoError(t, err)
+	require.Nil(t, got.TargetKcalOverride)
+	require.Nil(t, got.TargetProteinOverrideG)
+	require.Equal(t, 125.0, got.PlanBasisWeightKg)
+}

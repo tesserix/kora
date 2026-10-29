@@ -222,9 +222,23 @@ type OnboardingFields struct {
 	GoalWeightKg   float64
 	PaceKgPerWeek  float64
 	TargetDate     *time.Time
+
+	TargetKcalOverride     *float64
+	TargetProteinOverrideG *float64
+	PlanBasisWeightKg      float64
 }
 
 func (r Repository) SaveOnboarding(ctx context.Context, userID uuid.UUID, f OnboardingFields) (User, error) {
+	return r.saveFields(ctx, userID, f, true)
+}
+
+// SavePlan rewrites the same fields as SaveOnboarding without touching
+// onboarded_at: editing the plan must not look like (re-)onboarding.
+func (r Repository) SavePlan(ctx context.Context, userID uuid.UUID, f OnboardingFields) (User, error) {
+	return r.saveFields(ctx, userID, f, false)
+}
+
+func (r Repository) saveFields(ctx context.Context, userID uuid.UUID, f OnboardingFields, markOnboarded bool) (User, error) {
 	updates := map[string]any{
 		"sex":              f.Sex,
 		"birth_year":       f.BirthYear,
@@ -240,14 +254,21 @@ func (r Repository) SaveOnboarding(ctx context.Context, userID uuid.UUID, f Onbo
 		"goal_weight_kg":   f.GoalWeightKg,
 		"pace_kg_per_week": f.PaceKgPerWeek,
 		"target_date":      f.TargetDate,
-		"onboarded_at":     gorm.Expr("now()"),
+		"plan_saved_at":    gorm.Expr("now()"),
+
+		"target_kcal_override":      f.TargetKcalOverride,
+		"target_protein_override_g": f.TargetProteinOverrideG,
+		"plan_basis_weight_kg":      f.PlanBasisWeightKg,
+	}
+	if markOnboarded {
+		updates["onboarded_at"] = gorm.Expr("now()")
 	}
 	if err := r.db.WithContext(ctx).Model(&User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
-		return User{}, fmt.Errorf("user: save onboarding: %w", err)
+		return User{}, fmt.Errorf("user: save plan fields: %w", err)
 	}
 	var out User
 	if err := r.db.WithContext(ctx).First(&out, "id = ?", userID).Error; err != nil {
-		return User{}, fmt.Errorf("user: fetch after onboarding: %w", err)
+		return User{}, fmt.Errorf("user: fetch after save: %w", err)
 	}
 	return out, nil
 }
