@@ -136,6 +136,28 @@ func TestOttoTextOnly(t *testing.T) {
 	r := e.ask(t, ottoBody("why protein?", ""), http.StatusOK)
 	require.Equal(t, "Protein helps you stay full.", r.Data.Reply)
 	require.Nil(t, r.Data.Proposal)
+	require.False(t, r.Data.ShowSupport)
+}
+
+func TestOttoAtRiskTextOnlyShowsSupport(t *testing.T) {
+	e := newOttoEnv(t, `{"reply":"Protein helps you stay full.","change":null}`, fakeSignals{signals: atRiskSignals})
+	r := e.ask(t, ottoBody("why protein?", ""), http.StatusOK)
+	require.Equal(t, "Protein helps you stay full.", r.Data.Reply)
+	require.Nil(t, r.Data.Proposal)
+	require.True(t, r.Data.ShowSupport)
+}
+
+func TestOttoSignalsErrorTextOnlyShowsSupport(t *testing.T) {
+	e := newOttoEnv(t, `{"reply":"Hi","change":null}`, fakeSignals{err: errors.New("db down")})
+	r := e.ask(t, ottoBody("hi", ""), http.StatusOK)
+	require.True(t, r.Data.ShowSupport)
+}
+
+func TestOttoAtRiskOutOfBoundsShowsSupport(t *testing.T) {
+	e := newOttoEnv(t, `{"reply":"Sure","change":{"kcal_override":900}}`, fakeSignals{signals: atRiskSignals})
+	r := e.ask(t, ottoBody("900 calories please", ""), http.StatusOK)
+	require.Equal(t, outOfBoundsReply, r.Data.Reply)
+	require.True(t, r.Data.ShowSupport)
 }
 
 func TestOttoDropsOutOfBounds(t *testing.T) {
@@ -143,6 +165,7 @@ func TestOttoDropsOutOfBounds(t *testing.T) {
 	r := e.ask(t, ottoBody("900 calories please", ""), http.StatusOK)
 	require.Nil(t, r.Data.Proposal)
 	require.Equal(t, outOfBoundsReply, r.Data.Reply)
+	require.False(t, r.Data.ShowSupport)
 }
 
 func TestOttoAtRiskDropsLowerKcal(t *testing.T) {

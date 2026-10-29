@@ -236,8 +236,16 @@ func (h Handler) Otto(c *gin.Context) {
 			"Otto couldn't answer. You can still edit the numbers directly.")
 		return
 	}
+	// Every answer carries show_support, as coach chat does, so a text-only
+	// reply to an at-risk user still points them at support.
+	atRisk := true
+	if s, serr := h.signals.SignalsFor(ctx, userID, user.LocFromContext(c)); serr != nil {
+		slog.WarnContext(ctx, "onboarding: otto signals failed; treating as at risk", "err", serr, "user_id", userID)
+	} else {
+		atRisk = guardrails.AtRisk(s)
+	}
 	if reply.Change.empty() {
-		httpx.OK(c, ottoResponse{Reply: reply.Reply})
+		httpx.OK(c, ottoResponse{Reply: reply.Reply, ShowSupport: atRisk})
 		return
 	}
 
@@ -245,16 +253,10 @@ func (h Handler) Otto(c *gin.Context) {
 	newT, err := Calculate(newIn, year)
 	if err != nil {
 		// Dropped, never clamped: a clamped number is one the user did not ask for.
-		httpx.OK(c, ottoResponse{Reply: ottoOutOfBounds})
+		httpx.OK(c, ottoResponse{Reply: ottoOutOfBounds, ShowSupport: atRisk})
 		return
 	}
 
-	atRisk := true
-	if s, serr := h.signals.SignalsFor(ctx, userID, user.LocFromContext(c)); serr != nil {
-		slog.WarnContext(ctx, "onboarding: otto signals failed; treating as at risk", "err", serr, "user_id", userID)
-	} else {
-		atRisk = guardrails.AtRisk(s)
-	}
 	lowers := newT.Kcal < oldT.Kcal-ottoKcalTolerance ||
 		(newIn.Goal != "maintenance" && newIn.PaceKgPerWeek > draft.PaceKgPerWeek)
 	if atRisk && lowers {
