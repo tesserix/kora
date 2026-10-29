@@ -20,6 +20,9 @@ const (
 	// A value not listed here disappears into labelOther — see the #81
 	// lesson noted on the recipe call types just above.
 	callIdentifyBodyComposition = "identify_body_composition"
+	// Otto on the Plan page (POST /v1/me/plan/otto). Mirrors
+	// onboarding.callTypePlanOtto.
+	callPlanOtto = "plan_otto"
 )
 
 // labelOther is the sink for any value outside a known set. A non-zero count on
@@ -54,6 +57,8 @@ var classByCallType = map[string]string{
 	// screenshot — the same shape as an identify, so it belongs to the
 	// headline resolution class too.
 	callIdentifyBodyComposition: classResolution,
+	// One user message, one answer: the same shape as a coach ask.
+	callPlanOtto: classResolution,
 }
 
 // Mirrors ai.OutcomeOK / OutcomeError / OutcomeTimeout. Duplicated as literals

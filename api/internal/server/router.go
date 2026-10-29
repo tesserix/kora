@@ -570,6 +570,13 @@ func NewRouter(deps Deps) *gin.Engine {
 		v1.GET("/weight/trend", trackingHandler.WithSignals(
 			coach.NewSignalsSource(coachGrounder),
 		).WeightTrend)
+		// Here for the same reason: Otto drops plan changes for an at-risk
+		// user, and that judgement comes from coachGrounder. Unregistered
+		// without a provider, as /coach/ask's model calls would fail anyway.
+		if deps.Provider != nil {
+			v1.POST("/me/plan/otto", aitrace.Route("plan.otto", deps.AITraceUserKey),
+				onboardingHandler.WithOtto(deps.Provider, coachMeter, coach.NewSignalsSource(coachGrounder)).Otto)
+		}
 		if deps.Resolver != nil {
 			// The capture composer posts here: one endpoint that decides
 			// whether a message is food to log or something to talk about,

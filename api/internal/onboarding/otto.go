@@ -1,11 +1,24 @@
 package onboarding
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
+	"net/http"
 	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/guardrails"
+	"github.com/tesserix/kora/api/internal/httpx"
+	"github.com/tesserix/kora/api/internal/user"
 )
 
 // ottoChange is the model's JSON. Absent fields mean "no change".
@@ -126,4 +139,150 @@ func stripFence(s string) string {
 		s = s[i+1:]
 	}
 	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), "```"))
+}
+
+const (
+	callTypePlanOtto  = "plan_otto"
+	maxOttoMessage    = 500
+	ottoTimeout       = 15 * time.Second
+	ottoOutOfBounds   = "That would take your plan outside what Kora can safely set, so I've left it as it is."
+	ottoAtRiskReply   = "I'll keep your calories where they are for now. If eating feels hard at the moment, it can help to talk it through with someone you trust."
+	ottoKcalTolerance = 0.5
+)
+
+type ottoProposal struct {
+	Draft   Input        `json:"draft"`
+	Targets Targets      `json:"targets"`
+	Changes []PlanChange `json:"changes"`
+}
+
+type ottoResponse struct {
+	Reply       string        `json:"reply"`
+	Proposal    *ottoProposal `json:"proposal"`
+	ShowSupport bool          `json:"show_support"`
+}
+
+// Otto asks the model for a plan change and returns it only once Calculate
+// has produced every number and the Protective policy allows it. It does not
+// require onboarded_at: the Plan page is the last onboarding step.
+func (h Handler) Otto(c *gin.Context) {
+	if h.provider == nil {
+		httpx.Error(c, http.StatusServiceUnavailable, "otto_unavailable", "Otto is not available")
+		return
+	}
+	ctx := c.Request.Context()
+	userID, ok := user.IDFromContext(c)
+	if !ok {
+		httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid or missing token")
+		return
+	}
+	var body struct {
+		Message string `json:"message"`
+		Draft   Input  `json:"draft"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed otto body")
+		return
+	}
+	msg := strings.TrimSpace(body.Message)
+	if msg == "" || utf8.RuneCountInString(msg) > maxOttoMessage {
+		httpx.Error(c, http.StatusBadRequest, "invalid_input", "message must be 1 to 500 characters")
+		return
+	}
+	draft, year := body.Draft, h.now().Year()
+	oldT, err := Calculate(draft, year)
+	if err != nil {
+		// An override the user is still editing can be invalid; Otto can
+		// still talk about the plan the rest of the draft gives.
+		bare := draft
+		bare.KcalOverride, bare.ProteinOverrideG = nil, nil
+		if oldT, err = Calculate(bare, year); err != nil {
+			httpx.Error(c, http.StatusBadRequest, "invalid_input", err.Error())
+			return
+		}
+	}
+
+	ok, err = h.meter.WithinBudget(ctx, userID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not check AI budget")
+		return
+	}
+	if !ok {
+		httpx.Error(c, http.StatusTooManyRequests, "budget_exhausted",
+			"You've used your Otto allowance for now. You can still edit the numbers directly.")
+		return
+	}
+
+	prompt, err := json.Marshal(map[string]any{"message": msg, "inputs": draft, "targets": oldT})
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not build request")
+		return
+	}
+	callCtx, cancel := context.WithTimeout(ctx, ottoTimeout)
+	defer cancel()
+	callCtx, collector := ai.WithUsageCollector(callCtx)
+	raw, usage, err := h.provider.GenerateText(callCtx, ottoSystemPrompt, string(prompt))
+	for _, abandoned := range collector.Drain() {
+		h.recordOtto(ctx, userID, abandoned, nil)
+	}
+	h.recordOtto(ctx, userID, usage, err)
+	var reply ottoReply
+	if err == nil {
+		reply, err = parseOttoReply(raw)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "onboarding: otto failed", "err", err, "user_id", userID)
+		httpx.Error(c, http.StatusBadGateway, "otto_failed",
+			"Otto couldn't answer. You can still edit the numbers directly.")
+		return
+	}
+	if reply.Change.empty() {
+		httpx.OK(c, ottoResponse{Reply: reply.Reply})
+		return
+	}
+
+	newIn := reply.Change.apply(draft)
+	newT, err := Calculate(newIn, year)
+	if err != nil {
+		// Dropped, never clamped: a clamped number is one the user did not ask for.
+		httpx.OK(c, ottoResponse{Reply: ottoOutOfBounds})
+		return
+	}
+
+	atRisk := true
+	if s, serr := h.signals.SignalsFor(ctx, userID, user.LocFromContext(c)); serr != nil {
+		slog.WarnContext(ctx, "onboarding: otto signals failed; treating as at risk", "err", serr, "user_id", userID)
+	} else {
+		atRisk = guardrails.AtRisk(s)
+	}
+	lowers := newT.Kcal < oldT.Kcal-ottoKcalTolerance ||
+		(newIn.Goal != "maintenance" && newIn.PaceKgPerWeek > draft.PaceKgPerWeek)
+	if atRisk && lowers {
+		httpx.OK(c, ottoResponse{Reply: ottoAtRiskReply, ShowSupport: true})
+		return
+	}
+	httpx.OK(c, ottoResponse{
+		Reply:       reply.Reply,
+		Proposal:    &ottoProposal{Draft: newIn, Targets: newT, Changes: planChanges(draft, newIn, oldT, newT)},
+		ShowSupport: atRisk,
+	})
+}
+
+// recordOtto meters one provider call. A metering failure never fails the
+// request, matching recipes.Parser.record; the call type is forced so Otto's
+// spend is not booked as coach's.
+func (h Handler) recordOtto(ctx context.Context, userID uuid.UUID, u ai.Usage, err error) {
+	if u.Provider == "" {
+		u.Provider = h.provider.Name()
+	}
+	u.CallType = callTypePlanOtto
+	switch {
+	case err == nil && u.Outcome == "":
+		u.Outcome = ai.OutcomeOK
+	case err != nil && errors.Is(err, context.DeadlineExceeded):
+		u.Outcome = ai.OutcomeTimeout
+	case err != nil:
+		u.Outcome = ai.OutcomeError
+	}
+	_ = h.meter.Record(ctx, userID, u, ai.EstimateCostUSD(u))
 }
