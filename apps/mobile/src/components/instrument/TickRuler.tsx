@@ -1015,8 +1015,8 @@ function DetentedRuler(props: DetentedProps) {
   const mid = width / 2;
   // Same reason as continuous mode's `pad`: the first and last stops' labels
   // are centred on their tick, so without a margin the SVG clips half of each.
-  // The first stop is SELECTED by default on every detented ruler in
-  // onboarding, so this was visible immediately ("Lose weight" -> "veight").
+  // A detented ruler often sits on its first stop, so this shows at once
+  // ("Lose weight" -> "veight").
   const pad = width;
   const scaleWidth = Math.max(1, (labels.length - 1) * DETENT_PX) + pad * 2;
 

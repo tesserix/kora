@@ -6,6 +6,7 @@ import { Button } from "@/components/Button";
 import { Overline } from "@/components/Overline";
 import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
 import { Numeral } from "@/components/Numeral";
+import { safeBack } from "@/lib/safeBack";
 import { AuthScaffold, HEADER_SCROLLS_ABOVE_FONT_SCALE } from "@/components/AuthScaffold";
 import { ActivityFromHealth } from "@/components/ActivityFromHealth";
 import { useActivityHistory } from "@/health/useActivityHistory";
@@ -201,8 +202,9 @@ export default function Onboarding() {
     heightCm === null && "height",
     weightKg === null && "weight",
     activityLevel === null && "activity",
-    hasDestination && chosenGoalWeightKg === null && "goal weight",
-    hasDestination && paceKgPerWeek === null && "pace",
+    // Their rulers only render once weight gives the destination a rest value.
+    hasDestination && goalWeightRestKg !== null && chosenGoalWeightKg === null && "goal weight",
+    hasDestination && goalWeightRestKg !== null && paceKgPerWeek === null && "pace",
   ].filter((m): m is string => m !== false);
 
   // The full payload, or null until every required field is set. The
@@ -404,6 +406,7 @@ export default function Onboarding() {
 
   return (
     <AuthScaffold
+      onBack={isEdit ? () => safeBack("/plan") : undefined}
       header={
         <View
           style={{

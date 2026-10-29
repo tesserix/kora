@@ -1367,6 +1367,7 @@ test("useCreateLogBatch posts to /v1/logs/batch", async () => {
 test("useSubmitOnboarding replaces the cached profile with the onboarded one", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["profile"], { id: "u1", email: "a@b.c", goal: "", onboarded_at: null });
+  client.setQueryData(["dashboard"], { stale: true });
 
   const onboarded = {
     id: "u1",
@@ -1392,6 +1393,8 @@ test("useSubmitOnboarding replaces the cached profile with the onboarded one", a
   });
 
   await waitFor(() => expect(client.getQueryData(["profile"])).toEqual(onboarded));
+  // Home's gauge reads /v1/dashboard, which carries the target.
+  expect(client.getQueryState(["dashboard"])?.isInvalidated).toBe(true);
 });
 
 test("usePlan GETs /v1/me/plan", async () => {
@@ -1407,10 +1410,11 @@ test("usePlan GETs /v1/me/plan", async () => {
   expect(apiFetch).toHaveBeenCalledWith("/v1/me/plan");
 });
 
-test("useSavePlan PUTs the body, seeds the profile and invalidates the plan", async () => {
+test("useSavePlan PUTs the body, seeds the profile and invalidates the plan and dashboard", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["profile"], { id: "u1", target_kcal: 2000 });
   client.setQueryData(["plan"], { stale: true });
+  client.setQueryData(["dashboard"], { stale: true });
   const saved = { id: "u1", target_kcal: 1800, target_kcal_override: 1800 };
   (apiFetch as jest.Mock).mockResolvedValueOnce(saved);
   const input = {
@@ -1431,6 +1435,7 @@ test("useSavePlan PUTs the body, seeds the profile and invalidates the plan", as
   expect(apiFetch).toHaveBeenCalledWith("/v1/me/plan", { method: "PUT", body: JSON.stringify(input) });
   expect(client.getQueryData(["profile"])).toEqual(saved);
   expect(client.getQueryState(["plan"])?.isInvalidated).toBe(true);
+  expect(client.getQueryState(["dashboard"])?.isInvalidated).toBe(true);
 });
 
 // usePins/useSavedMeals are the only two read hooks with a nested food

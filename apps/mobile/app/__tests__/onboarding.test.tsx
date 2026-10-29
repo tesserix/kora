@@ -11,7 +11,7 @@ const mockMutate = jest.fn();
 let mockParams: Record<string, string> = {};
 
 jest.mock("expo-router", () => ({
-  router: { replace: jest.fn(), push: jest.fn(), navigate: jest.fn() },
+  router: { replace: jest.fn(), push: jest.fn(), navigate: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) },
   useLocalSearchParams: () => mockParams,
 }));
 // Mocked so a test can prove this screen never submits: it hands the draft
@@ -110,6 +110,8 @@ describe("onboarding", () => {
     expect(screen.queryByTestId("derivation-chain-row-3")).toBeNull();
 
     await tap("goal-ruler"); // Lose weight: a destination is now required
+    // ...but its rulers only appear once weight is set, so they aren't named yet.
+    expect(missing()).toBe("Set your sex, age, height, weight and activity");
     await tap("height-ruler");
     await tap("weight-ruler");
     expect(missing()).toBe("Set your sex, age, activity, goal weight and pace");
@@ -208,6 +210,19 @@ describe("onboarding", () => {
       weight_kg: 80.5,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
+  });
+
+  it("edit mode has a back control that returns to /plan", async () => {
+    mockParams = { mode: "edit", sex: "female", birth_year: String(new Date().getFullYear() - 41), height_cm: "162",
+      weight_kg: "80", activity_level: "light", goal: "maintenance" };
+    await render(<Onboarding />);
+    await fireEvent.press(screen.getByLabelText("Go back"));
+    expect(router.back).toHaveBeenCalled();
+  });
+
+  it("onboarding mode has no back control", async () => {
+    await render(<Onboarding />);
+    expect(screen.queryByLabelText("Go back")).toBeNull();
   });
 
   it("ignores a draft that fails validation and starts unset", async () => {

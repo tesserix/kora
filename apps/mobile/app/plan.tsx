@@ -65,9 +65,10 @@ export default function PlanScreen() {
   const draft = paramDraft ?? (plan.data ? draftFromParams(draftToParams(plan.data.inputs as PlanDraft)) : null);
   // input_error describes the stored destination; a draft from params replaced it.
   const inputError = fromServer ? (plan.data?.input_error ?? null) : null;
-  // onboarding.tsx falls back to mode=onboarding for an invalid edit draft, so
-  // an onboarded user always saves with PUT, never a second onboarding.
-  const isOnboarding = params.mode === "onboarding" && !profile.data?.onboarded_at;
+  // The profile alone decides POST or PUT: params.mode only says where the
+  // draft came from, and an edit round-trip during onboarding comes back as
+  // mode=edit for a user who still has to POST.
+  const isOnboarding = profile.data !== undefined && !profile.data.onboarded_at;
 
   if (!draft) {
     return (
@@ -113,9 +114,9 @@ export default function PlanScreen() {
   };
 
   const pending = submit.isPending || save.isPending;
-  // Until the profile loads, onboarding mode can't tell POST from PUT, and a
-  // POST for an onboarded user would reset onboarded_at.
-  const profileUnknown = params.mode === "onboarding" && profile.data === undefined;
+  // Until the profile loads the page can't tell POST from PUT, and a POST for
+  // an onboarded user would reset onboarded_at.
+  const profileUnknown = profile.data === undefined;
   const blocked = pending || profileUnknown || result.overrideError !== null || inputError !== null;
 
   function onPrimary() {
@@ -299,6 +300,21 @@ export default function PlanScreen() {
             ) : null}
           </View>
 
+          {profile.error && profileUnknown ? (
+            <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap" }}>
+              <AppText testID="profile-error" accessibilityRole="alert" style={errorText}>
+                Couldn&apos;t load your profile.
+              </AppText>
+              <PressableScale
+                accessibilityRole="button"
+                haptic="none"
+                onPress={() => profile.refetch()}
+                style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: spacing.sm }}
+              >
+                <AppText style={{ fontSize: 13, fontWeight: "600", color: instrument.ink }}>Try again</AppText>
+              </PressableScale>
+            </View>
+          ) : null}
           {submitError ? (
             <AppText testID="submit-error" accessibilityRole="alert" style={errorText}>
               {submitError}
@@ -310,6 +326,11 @@ export default function PlanScreen() {
             onPress={onPrimary}
             disabled={blocked}
           />
+          {profile.data && !isOnboarding && !profile.data.plan_saved_at ? (
+            <AppText testID="plan-unsaved" variant="footnote" muted style={{ textAlign: "center" }}>
+              Kora&apos;s current calculation. Save to make it your plan.
+            </AppText>
+          ) : null}
 
           <AppText variant="footnote" muted style={{ textAlign: "center" }}>
             Kora gives general nutrition information, not medical advice. For medical concerns, talk to

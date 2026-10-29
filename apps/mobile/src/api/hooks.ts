@@ -273,7 +273,11 @@ export function useSubmitOnboarding() {
     // straight back to onboarding — where nothing sends them home again once the
     // refetch lands. /v1/onboarding returns the same full user row as /v1/me, so
     // the response is safe to use as the profile outright.
-    onSuccess: (profile) => qc.setQueryData(["profile"], profile),
+    onSuccess: (profile) => {
+      qc.setQueryData(["profile"], profile);
+      // Home's gauge reads the target from /v1/dashboard.
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
   });
 }
 
@@ -294,6 +298,7 @@ export function useSavePlan(): UseMutationResult<Profile, Error, OnboardingInput
     // Seed the profile like useSubmitOnboarding; PUT returns the same user row as /v1/me.
     onSuccess: (profile) => {
       qc.setQueryData(["profile"], profile);
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
       return qc.invalidateQueries({ queryKey: ["plan"] });
     },
   });

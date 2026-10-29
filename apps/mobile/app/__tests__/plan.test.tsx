@@ -35,12 +35,14 @@ jest.mock("@/lib/api", () => ({
 const mockSubmit = jest.fn();
 const mockSave = jest.fn();
 const mockUsePlan = jest.fn();
-let mockProfile: { onboarded_at: string | null } | undefined;
+let mockProfile: { onboarded_at: string | null; plan_saved_at?: string | null } | undefined;
+let mockProfileError: Error | null = null;
+const mockRefetch = jest.fn();
 jest.mock("@/api/hooks", () => ({
   useSubmitOnboarding: () => ({ mutate: mockSubmit, isPending: false }),
   useSavePlan: () => ({ mutate: mockSave, isPending: false }),
   usePlan: (...a: unknown[]) => mockUsePlan(...a),
-  useProfile: () => ({ data: mockProfile }),
+  useProfile: () => ({ data: mockProfile, error: mockProfileError, refetch: mockRefetch }),
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -82,6 +84,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockParams = { ...draftToParams(DRAFT), mode: "onboarding" };
   mockProfile = { onboarded_at: null };
+  mockProfileError = null;
   mockUsePlan.mockReturnValue({ data: undefined, isLoading: false, error: null });
 });
 
@@ -181,6 +184,51 @@ describe("plan page", () => {
     await fireEvent.press(primary());
     expect(mockSubmit).not.toHaveBeenCalled();
     expect(mockSave).toHaveBeenCalledWith(DRAFT, expect.anything());
+  });
+
+  it("edit round-trip during onboarding still submits with POST", async () => {
+    mockParams = { ...draftToParams(DRAFT), mode: "edit" };
+    await render(<Plan />);
+    expect(screen.getByText("Start with this plan")).toBeTruthy();
+    await fireEvent.press(primary());
+    expect(mockSubmit).toHaveBeenCalledWith(DRAFT, expect.anything());
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it("keeps the button disabled until the profile has loaded, in any mode", async () => {
+    mockParams = { ...draftToParams(DRAFT), mode: "edit" };
+    mockProfile = undefined;
+    await render(<Plan />);
+    expect(primary().props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(primary());
+    expect(mockSubmit).not.toHaveBeenCalled();
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it("a profile load failure says so and offers Try again", async () => {
+    mockProfile = undefined;
+    mockProfileError = new Error("offline");
+    await render(<Plan />);
+    expect(screen.getByTestId("profile-error")).toHaveTextContent("Couldn't load your profile.");
+    expect(primary().props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(screen.getByText("Try again"));
+    expect(mockRefetch).toHaveBeenCalled();
+  });
+
+  it("an onboarded user who never saved a plan is told Save makes it theirs", async () => {
+    mockProfile = { onboarded_at: "2026-10-01T00:00:00Z", plan_saved_at: null };
+    await render(<Plan />);
+    expect(screen.getByTestId("plan-unsaved")).toHaveTextContent(
+      "Kora's current calculation. Save to make it your plan.",
+    );
+  });
+
+  it("no unsaved caption during onboarding or once a plan is saved", async () => {
+    await render(<Plan />);
+    expect(screen.queryByTestId("plan-unsaved")).toBeNull();
+    mockProfile = { onboarded_at: "2026-10-01T00:00:00Z", plan_saved_at: "2026-10-02T00:00:00Z" };
+    await render(<Plan />);
+    expect(screen.queryByTestId("plan-unsaved")).toBeNull();
   });
 
   it("onboarding mode keeps the button disabled until the profile has loaded", async () => {
