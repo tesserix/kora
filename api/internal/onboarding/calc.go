@@ -1,7 +1,10 @@
 // Package onboarding computes energy and macro targets from user metrics.
 package onboarding
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 type Input struct {
 	Sex           string  `json:"sex"`
@@ -56,6 +59,10 @@ const (
 	CodeProteinAboveMax      = "protein_above_max"
 	CodeProteinExceedsShare  = "protein_exceeds_share"
 )
+
+// isFinite is false for NaN and +/-Inf, which would otherwise slip past every
+// bound comparison below (all comparisons with NaN are false).
+func isFinite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 // OverrideError reports an out-of-bounds calorie or protein override.
 type OverrideError struct{ Code string }
@@ -239,7 +246,7 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 
 	t := Targets{Bmr: bmr, Tdee: tdee, ProteinGPerKg: perKg, ProteinRefKg: refKg}
 	if o := in.KcalOverride; o != nil {
-		if *o < bmr-overrideEpsilon {
+		if !isFinite(*o) || *o < bmr-overrideEpsilon {
 			return Targets{}, &OverrideError{CodeKcalBelowRestingBurn}
 		}
 		if *o > tdee*maxKcalOverrideTdeeMultiple+overrideEpsilon {
@@ -248,7 +255,7 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 		kcal, floored, t.KcalOverridden = *o, false, true
 	}
 	if o := in.ProteinOverrideG; o != nil {
-		if *o < minProteinOverrideGPerKg*in.WeightKg-overrideEpsilon {
+		if !isFinite(*o) || *o < minProteinOverrideGPerKg*in.WeightKg-overrideEpsilon {
 			return Targets{}, &OverrideError{CodeProteinBelowMin}
 		}
 		if *o > maxProteinOverrideGPerKg*in.WeightKg+overrideEpsilon {

@@ -125,13 +125,35 @@ describe("computePlan with a bad override", () => {
     sex: "female", age: 36, heightCm: 160, weightKg: 73, activityLevel: "light",
     goal: "fat_loss", paceKgPerWeek: 0.25, goalWeightKg: 68,
   };
-  it("reports the error and returns the un-overridden numbers", () => {
+  const heavy: PlanInput = {
+    sex: "female", age: 60, heightCm: 160, weightKg: 200, activityLevel: "sedentary",
+    goal: "maintenance", paceKgPerWeek: 0,
+  };
+  it("drops only the failing kcal override and keeps a valid protein one", () => {
     const plain = computePlan(tester);
     const plan = computePlan({ ...tester, kcalOverride: 1388, proteinOverrideG: 125 });
     expect(plan.overrideError).toBe("kcal_below_resting_burn");
     expect(plan.kcalOverridden).toBe(false);
-    expect(plan.proteinOverridden).toBe(false);
+    expect(plan.proteinOverridden).toBe(true);
     expect(plan.kcal).toBe(plain.kcal);
-    expect(plan.proteinG).toBe(plain.proteinG);
+    expect(plan.proteinG).toBe(125);
+  });
+  it("reports the protein code when the surviving protein override fails against the plain kcal", () => {
+    const plan = computePlan({ ...heavy, goal: "fat_loss", paceKgPerWeek: 2, kcalOverride: 1, proteinOverrideG: 500 });
+    expect(plan.overrideError).toBe("protein_exceeds_share");
+    expect(plan.kcalOverridden).toBe(false);
+    expect(plan.proteinOverridden).toBe(false);
+  });
+  it("keeps a valid kcal override when protein fails the share check", () => {
+    const plan = computePlan({ ...heavy, kcalOverride: 2539, proteinOverrideG: 500 });
+    expect(plan.overrideError).toBe("protein_exceeds_share");
+    expect(plan.kcalOverridden).toBe(true);
+    expect(plan.proteinOverridden).toBe(false);
+    expect(plan.kcal).toBe(2539);
+  });
+  it.each([NaN, Infinity, -Infinity])("rejects a non-finite override (%f)", (v) => {
+    expect(computePlan({ ...tester, kcalOverride: v }).overrideError).toBe("kcal_below_resting_burn");
+    expect(computePlan({ ...tester, proteinOverrideG: v }).overrideError).toBe("protein_below_min");
+    expect(computePlan({ ...tester, kcalOverride: v }).kcalOverridden).toBe(false);
   });
 });

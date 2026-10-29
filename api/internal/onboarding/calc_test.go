@@ -389,3 +389,11 @@ func TestProteinOverrideShareUsesEffectiveKcal(t *testing.T) {
 	_, err := Calculate(withProtein(in, 470), 2026)
 	require.NoError(t, err)
 }
+
+func TestNonFiniteOverridesAreRejected(t *testing.T) {
+	base := fatLossTester("light", 0.25, 68)
+	for _, v := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		requireOverrideErr(t, withKcal(base, v), "kcal_below_resting_burn")
+		requireOverrideErr(t, withProtein(base, v), "protein_below_min")
+	}
+}

@@ -88,20 +88,21 @@ const MAX_PROTEIN_OVERRIDE_KCAL_SHARE = 0.75;
 const OVERRIDE_EPSILON = 1e-9;
 
 // Check order matches calc.go: kcal bounds, protein min/max, then share.
-function overrideError(input: PlanInput, bmr: number, tdee: number, kcal: number): OverrideCode | null {
-  const k = input.kcalOverride;
-  if (k != null) {
-    if (k < bmr - OVERRIDE_EPSILON) return "kcal_below_resting_burn";
-    if (k > tdee * MAX_KCAL_OVERRIDE_TDEE_MULTIPLE + OVERRIDE_EPSILON) return "kcal_above_ceiling";
+// Non-finite values (a blank field parsed to NaN) fail the first bound of
+// their kind, as in calc.go.
+function kcalError(k: number, bmr: number, tdee: number): OverrideCode | null {
+  if (!Number.isFinite(k) || k < bmr - OVERRIDE_EPSILON) return "kcal_below_resting_burn";
+  if (k > tdee * MAX_KCAL_OVERRIDE_TDEE_MULTIPLE + OVERRIDE_EPSILON) return "kcal_above_ceiling";
+  return null;
+}
+
+function proteinError(p: number, weightKg: number, effectiveKcal: number): OverrideCode | null {
+  if (!Number.isFinite(p) || p < MIN_PROTEIN_OVERRIDE_G_PER_KG * weightKg - OVERRIDE_EPSILON) {
+    return "protein_below_min";
   }
-  const p = input.proteinOverrideG;
-  if (p != null) {
-    if (p < MIN_PROTEIN_OVERRIDE_G_PER_KG * input.weightKg - OVERRIDE_EPSILON) return "protein_below_min";
-    if (p > MAX_PROTEIN_OVERRIDE_G_PER_KG * input.weightKg + OVERRIDE_EPSILON) return "protein_above_max";
-    const effectiveKcal = k ?? kcal;
-    if (p * KCAL_PER_GRAM_MACRO > MAX_PROTEIN_OVERRIDE_KCAL_SHARE * effectiveKcal + OVERRIDE_EPSILON) {
-      return "protein_exceeds_share";
-    }
+  if (p > MAX_PROTEIN_OVERRIDE_G_PER_KG * weightKg + OVERRIDE_EPSILON) return "protein_above_max";
+  if (p * KCAL_PER_GRAM_MACRO > MAX_PROTEIN_OVERRIDE_KCAL_SHARE * effectiveKcal + OVERRIDE_EPSILON) {
+    return "protein_exceeds_share";
   }
   return null;
 }
@@ -145,16 +146,20 @@ export function computePlan(input: PlanInput): Plan {
   const proteinGPerKg = proteinFactor(input.goal, input.activityLevel);
   let proteinG = proteinGPerKg * proteinRefKg;
 
-  // A bad override is reported, not thrown, and the plan stays un-overridden
-  // so the screen can show both the error and the numbers it falls back to.
-  const error = overrideError(input, bmr, tdee, kcal);
-  const kcalOverridden = !error && input.kcalOverride != null;
-  const proteinOverridden = !error && input.proteinOverrideG != null;
+  // A bad override is reported, not thrown, and only the failing one is
+  // dropped: a valid override is never lost because the other was bad. A
+  // surviving protein override is re-checked against the kcal actually used.
+  const kcalErr = input.kcalOverride != null ? kcalError(input.kcalOverride, bmr, tdee) : null;
+  const kcalOverridden = input.kcalOverride != null && !kcalErr;
   if (kcalOverridden) {
     kcal = input.kcalOverride as number;
     floored = false;
   }
+  const proteinErr =
+    input.proteinOverrideG != null ? proteinError(input.proteinOverrideG, input.weightKg, kcal) : null;
+  const proteinOverridden = input.proteinOverrideG != null && !proteinErr;
   if (proteinOverridden) proteinG = input.proteinOverrideG as number;
+  const error = proteinErr ?? kcalErr;
 
   const fatG = (kcal * FAT_CALORIE_PCT) / KCAL_PER_GRAM_FAT;
   const carbsG = Math.max(
