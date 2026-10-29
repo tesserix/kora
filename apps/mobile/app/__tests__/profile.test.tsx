@@ -212,3 +212,18 @@ test("surfaces a retired handle with its own distinct message", async () => {
   await waitFor(() => expect(getByText("That handle was retired and can't be reused.")).toBeTruthy());
   expect(queryByText("That handle is taken.")).toBeNull();
 });
+
+test("profile shows Your plan with a Custom badge when overridden", async () => {
+  mockMe.mockReturnValue({ data: { ...BASE_PROFILE, target_kcal_override: null, target_protein_override_g: null } });
+  const plain = await render(<Profile />);
+  expect(plain.getByText("Your plan")).toBeTruthy();
+  expect(plain.getByText("1850 kcal")).toBeTruthy();
+  expect(plain.queryByText("Custom")).toBeNull();
+  plain.unmount();
+
+  mockMe.mockReturnValue({ data: { ...BASE_PROFILE, target_kcal_override: 2000, target_protein_override_g: null } });
+  const { getByText } = await render(<Profile />);
+  expect(getByText("Custom")).toBeTruthy();
+  await fireEvent.press(getByText("Your plan"));
+  expect(mockPush).toHaveBeenCalledWith("/plan");
+});

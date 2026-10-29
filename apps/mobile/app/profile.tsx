@@ -417,6 +417,32 @@ export default function ProfileScreen() {
             </GlassPanel>
           </View>
 
+          <GroupedSection>
+            <Row
+              title="Your plan"
+              detail={data ? `${Math.round(data.target_kcal)} kcal` : undefined}
+              chevron
+              onPress={() => router.push("/plan")}
+              right={
+                data && (data.target_kcal_override != null || data.target_protein_override_g != null) ? (
+                  // Teal = status, never accent (one orange per screen).
+                  <View
+                    style={{
+                      marginHorizontal: spacing.xs,
+                      paddingHorizontal: spacing.sm,
+                      paddingVertical: 2,
+                      borderRadius: 999,
+                      borderWidth: 1,
+                      borderColor: instrument.teal,
+                    }}
+                  >
+                    <AppText style={{ fontSize: 11, fontWeight: "700", color: instrument.teal }}>Custom</AppText>
+                  </View>
+                ) : undefined
+              }
+            />
+          </GroupedSection>
+
           <View>
             <AppText style={[engravedStyle(instrument), { marginLeft: spacing.md, marginBottom: spacing.xs }]}>
               Account
