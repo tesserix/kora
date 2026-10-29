@@ -651,6 +651,23 @@ export type PlanResponse = {
   input_error: string | null;
 };
 
+export type PlanChangeField =
+  | "activity_level"
+  | "goal"
+  | "goal_weight_kg"
+  | "pace_kg_per_week"
+  | "kcal"
+  | "protein_g"
+  | "carbs_g"
+  | "fat_g";
+
+export type PlanChange = { field: PlanChangeField; from: string | number; to: string | number };
+
+/** A plan Otto proposes; the server computed `targets` from `draft`, nothing is saved. */
+export type PlanOttoProposal = { draft: PlanInputs; targets: PlanTargets; changes: PlanChange[] };
+
+export type PlanOttoResponse = { reply: string; proposal: PlanOttoProposal | null; show_support: boolean };
+
 /**
  * Which instrument produced a body-composition reading (kora#45).
  *
