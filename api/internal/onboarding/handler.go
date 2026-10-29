@@ -23,6 +23,7 @@ import (
 // only asks for the one write it needs.
 type WeightRecorder interface {
 	AddWeightEntry(ctx context.Context, userID uuid.UUID, in tracking.WeightInput) (tracking.WeightEntry, error)
+	LatestWeightKg(ctx context.Context, userID uuid.UUID) (float64, bool, error)
 }
 
 // onboardingWeighInNamespace derives a deterministic weight_entries.id per
@@ -157,6 +158,12 @@ func (h Handler) resolve(ctx context.Context, in Input) (user.OnboardingFields, 
 // existing entry, then insert" sequence, which two concurrent requests could
 // both pass before either had written anything.
 func (h Handler) recordFirstWeighIn(ctx context.Context, userID uuid.UUID, weightKg float64, tz string) {
+	h.recordWeighIn(ctx, userID, weightKg, tz, uuid.NewSHA1(onboardingWeighInNamespace, userID[:]))
+}
+
+// recordWeighIn is the shared write. A uuid.Nil id makes a fresh entry (a plan
+// edit's new weight); a non-nil id makes the write idempotent.
+func (h Handler) recordWeighIn(ctx context.Context, userID uuid.UUID, weightKg float64, tz string, id uuid.UUID) {
 	if h.weights == nil {
 		return
 	}
@@ -174,7 +181,6 @@ func (h Handler) recordFirstWeighIn(ctx context.Context, userID uuid.UUID, weigh
 		slog.WarnContext(ctx, "onboarding: resolve local date for weigh-in failed", "err", err, "user_id", userID)
 		return
 	}
-	id := uuid.NewSHA1(onboardingWeighInNamespace, userID[:])
 	_, err = h.weights.AddWeightEntry(ctx, userID, tracking.WeightInput{
 		WeightKg:  weightKg,
 		LoggedAt:  now,

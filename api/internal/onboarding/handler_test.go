@@ -215,6 +215,10 @@ func (erroringWeightRecorder) AddWeightEntry(context.Context, uuid.UUID, trackin
 	return tracking.WeightEntry{}, errors.New("boom")
 }
 
+func (erroringWeightRecorder) LatestWeightKg(context.Context, uuid.UUID) (float64, bool, error) {
+	return 0, false, errors.New("boom")
+}
+
 // TestSubmitRecordsFirstWeighIn is the core kora#45 behaviour: onboarding's
 // stated weight becomes a real weight_entries row, not just profile.weight_kg.
 func TestSubmitRecordsFirstWeighIn(t *testing.T) {

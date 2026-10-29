@@ -252,6 +252,8 @@ func NewRouter(deps Deps) *gin.Engine {
 			deps.SignIn.MountAccount(v1)
 		}
 		v1.POST("/onboarding", onboardingHandler.Submit)
+		v1.GET("/me/plan", onboardingHandler.GetPlan)
+		v1.PUT("/me/plan", onboardingHandler.PutPlan)
 		v1.GET("/notifications", notificationsHandler.List)
 		v1.GET("/notifications/unread-count", notificationsHandler.UnreadCount)
 		v1.POST("/notifications/read", notificationsHandler.MarkAllRead)
