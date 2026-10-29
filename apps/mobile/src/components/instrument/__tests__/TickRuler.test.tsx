@@ -1076,3 +1076,73 @@ describe("TickRuler unset state", () => {
     void (<TickRuler mode="detented" index={null} labels={ACTIVITY} accessibilityLabel="a" onChange={jest.fn()} />);
   });
 });
+
+// Review round 1. kora#176: the gesture must never close over the current
+// value. A set ruler reports a value on every step of a drag, and the parent
+// echoes it straight back, so a gesture rebuilt on that echo re-attaches its
+// handlers mid-drag.
+describe("TickRuler unset state, gesture stability and rest changes", () => {
+  // Counted at the builders rather than read off the handler registry: the
+  // jest registry keeps the first-registered handler, so it cannot see a
+  // rebuild. A new Pan, Tap or Race is exactly a new detector prop.
+  it("keeps the same gestures across value changes while set", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Gesture } = require("react-native-gesture-handler");
+    const onChange = jest.fn();
+    const { rerender } = await render(<TickRuler {...base} value={84} onChange={onChange} />);
+    const spies = ["Pan", "Tap", "Race"].map((k) => jest.spyOn(Gesture, k));
+    try {
+      await rerender(<TickRuler {...base} value={84.5} onChange={onChange} />);
+      await rerender(<TickRuler {...base} value={85} onChange={onChange} />);
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spies.forEach((spy) => spy.mockRestore());
+    }
+  });
+
+  // A kg/lb toggle moves the rest point while nothing is chosen yet. The tap
+  // reports where the scale actually sits, so this also proves the scale moved.
+  it("moves the scale to a new restValue while unset", async () => {
+    const onChange = jest.fn();
+    const { rerender } = await render(
+      <TickRuler {...base} value={null} restValue={70} onChange={onChange} />,
+    );
+    await rerender(<TickRuler {...base} value={null} restValue={154} onChange={onChange} />);
+    fireGestureHandler(getByGestureTestId("weight-ruler-tap"));
+    expect(onChange).toHaveBeenCalledWith(154);
+    // A drag starts from the scale's live position, so this reads the offset.
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+      { translationX: 0 },
+      { translationX: -9 },
+    ]);
+    expect(onChange).toHaveBeenLastCalledWith(155);
+  });
+
+  it("moves the scale to a new restIndex while unset", async () => {
+    const onChange = jest.fn();
+    const props = {
+      mode: "detented" as const,
+      index: null,
+      labels: ACTIVITY,
+      accessibilityLabel: "Activity level",
+      testID: "activity-ruler",
+      onChange,
+    };
+    const { rerender } = await render(<TickRuler {...props} restIndex={1} />);
+    await rerender(<TickRuler {...props} restIndex={3} />);
+    fireGestureHandler(getByGestureTestId("activity-ruler-tap"));
+    expect(onChange).toHaveBeenCalledWith(3);
+    fireGestureHandler(getByGestureTestId("activity-ruler-pan"), [
+      { translationX: 0 },
+      { translationX: -96 },
+    ]);
+    expect(onChange).toHaveBeenLastCalledWith(4);
+  });
+
+  // The default Tap fails after 500ms, so a slow, deliberate press would
+  // commit nothing: the kora#164 trap again.
+  it("accepts a slow tap", async () => {
+    await render(<TickRuler {...base} value={null} restValue={70} onChange={jest.fn()} />);
+    expect(getByGestureTestId("weight-ruler-tap").config.maxDurationMs).toBeGreaterThanOrEqual(5000);
+  });
+});

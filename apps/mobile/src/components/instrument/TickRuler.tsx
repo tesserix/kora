@@ -141,6 +141,8 @@ const RUBBER_BAND_COEFFICIENT = 0.55;
 // scrolls nothing and the page reads as frozen.
 const ACTIVE_OFFSET_X = 10;
 const FAIL_OFFSET_Y = 15;
+// How long an unset ruler's tap may be held and still commit (see useUnsetTap).
+const UNSET_TAP_MAX_MS = 5000;
 
 // --- Dynamic Type for the SVG scale labels (kora#261) -----------------------
 //
@@ -426,11 +428,17 @@ export function indexFromDrag(startIndex: number, translationX: number, stopCoun
  * Its own hook rather than a memo inside useDragReport: there, the
  * react-hooks/refs lint misreads `report` (which reads refs) as being called
  * during render as soon as a second gesture closes over it.
+ *
+ * Reports where the scale SITS (`offset`, read on the UI thread), never a
+ * value captured at render: closing over the value would rebuild the gesture
+ * on every step of a set ruler's drag and re-attach its handlers mid-drag
+ * (kora#176). While unset the offset is the rest position.
  */
 function useUnsetTap(
   testID: string,
   unset: boolean,
-  rest: number,
+  offset: SharedValue<number>,
+  compute: (start: number, translationX: number) => number,
   report: (next: number) => void,
 ): TapGesture {
   return useMemo(
@@ -440,11 +448,15 @@ function useUnsetTap(
         .enabled(unset)
         // A finger that travels far enough to be a drag or a scroll is not a tap.
         .maxDistance(ACTIVE_OFFSET_X)
+        // RNGH fails a tap held past 500ms by default, so a slow, deliberate
+        // press would set nothing: the kora#164 trap again. Movement, not
+        // time, is what separates a tap from a drag here.
+        .maxDuration(UNSET_TAP_MAX_MS)
         .onEnd((_e, success) => {
           "worklet";
-          if (success) runOnJS(report)(rest);
+          if (success) runOnJS(report)(compute(offset.value, 0));
         }),
-    [report, rest, testID, unset],
+    [compute, offset, report, testID, unset],
   );
 }
 
@@ -573,7 +585,9 @@ function useDragReport({
   // frame of a drag, and adopting it would snap the scale to the last whole
   // step and cancel the rubber-band the finger is currently stretching.
   useEffect(() => {
-    if (current !== lastReportedRef.current) offset.value = current ?? rest;
+    // Unset, there is no echo to tell apart (null === null), so a moved rest
+    // point (a kg/lb toggle) must always move the scale.
+    if (current === null || current !== lastReportedRef.current) offset.value = current ?? rest;
   }, [current, offset, rest]);
 
   const pan = useMemo(
@@ -637,7 +651,7 @@ function useDragReport({
     [compute, dragStart, hi, lastSnapped, lo, offset, pxPerUnit, report, testID, unset, width],
   );
 
-  const tap = useUnsetTap(testID, unset, rest, report);
+  const tap = useUnsetTap(testID, unset, offset, compute, report);
 
   // Race: whichever claims the touch first cancels the other, so a drag never
   // also fires the tap and a tap costs no extra delay.
