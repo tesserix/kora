@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -55,21 +56,20 @@ func (e planEnv) do(t *testing.T, method, path, body string) *httptest.ResponseR
 }
 
 func planBody(weight float64, extra string) string {
-	b := `{"sex":"male","birth_year":1995,"height_cm":180,"weight_kg":` + strings.TrimRight(strings.TrimRight(
-		strings.TrimSpace(string(mustJSON(weight))), "0"), ".") + `,"activity_level":"moderate","goal":"maintenance"`
+	b := `{"sex":"male","birth_year":1995,"height_cm":180,"weight_kg":` + strconv.FormatFloat(weight, 'f', -1, 64) +
+		`,"activity_level":"moderate","goal":"maintenance"`
 	if extra != "" {
 		b += "," + extra
 	}
 	return b + "}"
 }
 
-func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
-
 type planResp struct {
 	Data struct {
 		Inputs        Input   `json:"inputs"`
 		Targets       Targets `json:"targets"`
 		OverrideError *string `json:"override_error"`
+		InputError    *string `json:"input_error"`
 	} `json:"data"`
 }
 
@@ -140,7 +140,12 @@ func TestGetPlanKeepsValidOverrideWhenOtherFails(t *testing.T) {
 
 	p := e.getPlan(t)
 	require.NotNil(t, p.Data.OverrideError)
+	require.Equal(t, "protein_above_max", *p.Data.OverrideError)
 	require.Equal(t, 2600.0, p.Data.Targets.Kcal)
+	want, err := Calculate(Input{Sex: "male", BirthYear: 1995, HeightCm: 180, WeightKg: 70,
+		ActivityLevel: "moderate", Goal: "maintenance"}, referenceNow(t).Year())
+	require.NoError(t, err)
+	require.Equal(t, want.ProteinG, p.Data.Targets.ProteinG)
 }
 
 func TestGetPlanNotOnboarded409(t *testing.T) {
@@ -194,4 +199,40 @@ func TestPutPlanRejectsInvalidOverride(t *testing.T) {
 	w := e.do(t, http.MethodPut, "/v1/me/plan", planBody(73, `"target_protein_override_g":999`))
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Contains(t, w.Body.String(), `"invalid_override"`)
+}
+
+func TestGetPlanSurvivesReachedGoal(t *testing.T) {
+	e := newPlanEnv(t)
+	require.Equal(t, 200, e.do(t, "POST", "/v1/onboarding",
+		strings.Replace(planBody(73, `"goal_weight_kg":70,"pace_kg_per_week":0.5`), `"maintenance"`, `"fat_loss"`, 1)).Code)
+	e.addWeighIn(t, 69.5)
+
+	p := e.getPlan(t)
+	require.NotNil(t, p.Data.InputError)
+	require.NotZero(t, p.Data.Targets.Kcal)
+	require.Equal(t, 69.5, p.Data.Inputs.WeightKg)
+	require.Equal(t, 70.0, p.Data.Inputs.GoalWeightKg)
+}
+
+func TestGetPlanSurvivesPaceAboveOnePercent(t *testing.T) {
+	e := newPlanEnv(t)
+	w := e.do(t, "POST", "/v1/onboarding",
+		strings.Replace(planBody(80, `"goal_weight_kg":70,"pace_kg_per_week":0.75`), `"maintenance"`, `"fat_loss"`, 1))
+	require.Equal(t, 200, w.Code, w.Body.String())
+	e.addWeighIn(t, 70)
+
+	p := e.getPlan(t)
+	require.NotNil(t, p.Data.InputError)
+	require.NotZero(t, p.Data.Targets.Kcal)
+	require.Equal(t, 0.75, p.Data.Inputs.PaceKgPerWeek)
+}
+
+func TestPutPlanComparesAgainstLatestWeighIn(t *testing.T) {
+	e := newPlanEnv(t)
+	require.Equal(t, 200, e.do(t, "POST", "/v1/onboarding", planBody(73, "")).Code)
+	e.addWeighIn(t, 71)
+	require.Equal(t, int64(2), e.weighInCount(t))
+
+	require.Equal(t, 200, e.do(t, "PUT", "/v1/me/plan", planBody(71, "")).Code)
+	require.Equal(t, int64(2), e.weighInCount(t))
 }

@@ -1,7 +1,9 @@
 package onboarding
 
 import (
+	"context"
 	"errors"
+	"math"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -35,16 +37,10 @@ func (h Handler) GetPlan(c *gin.Context) {
 		httpx.Error(c, http.StatusConflict, "not_onboarded", "onboarding is not complete")
 		return
 	}
-	weight := u.WeightKg
-	if h.weights != nil {
-		kg, found, err := h.weights.LatestWeightKg(ctx, userID)
-		if err != nil {
-			httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not load plan")
-			return
-		}
-		if found {
-			weight = kg
-		}
+	weight, err := h.currentWeight(ctx, u)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not load plan")
+		return
 	}
 	in := Input{
 		Sex: u.Sex, BirthYear: u.BirthYear, HeightCm: u.HeightCm, WeightKg: weight,
@@ -53,26 +49,38 @@ func (h Handler) GetPlan(c *gin.Context) {
 		KcalOverride: u.TargetKcalOverride, ProteinOverrideG: u.TargetProteinOverrideG,
 	}
 
-	// Check each override on its own and drop only the ones that fail, so a
-	// valid one survives; the first failing code (kcal, then protein) is reported.
 	year := h.now().Year()
+	calc := in
+	// A newer weight can break the stored destination (pace over 1% of
+	// bodyweight, goal already reached); the plan still has to load, so
+	// compute without the destination and say why in input_error.
+	var inputErr *string
+	if _, err := Calculate(Input{Sex: in.Sex, BirthYear: in.BirthYear, HeightCm: in.HeightCm, WeightKg: in.WeightKg,
+		ActivityLevel: in.ActivityLevel, Goal: in.Goal, GoalWeightKg: in.GoalWeightKg, PaceKgPerWeek: in.PaceKgPerWeek}, year); err != nil {
+		msg := err.Error()
+		inputErr = &msg
+		calc.GoalWeightKg = 0
+		calc.PaceKgPerWeek = math.Min(calc.PaceKgPerWeek, in.WeightKg*maxPaceFractionOfBodyweight)
+	}
+
+	// Check each override against the full (fallback-applied) input and drop
+	// only the ones that fail, so a valid one survives; the first failing
+	// code (kcal, then protein) is reported.
 	var overrideErr *string
-	checked := in
+	withOnly := func(k, p *float64) Input { x := calc; x.KcalOverride, x.ProteinOverrideG = k, p; return x }
 	if in.KcalOverride != nil {
-		if _, err := Calculate(Input{Sex: in.Sex, BirthYear: in.BirthYear, HeightCm: in.HeightCm, WeightKg: in.WeightKg,
-			ActivityLevel: in.ActivityLevel, Goal: in.Goal, GoalWeightKg: in.GoalWeightKg, KcalOverride: in.KcalOverride}, year); err != nil {
-			checked.KcalOverride = nil
+		if _, err := Calculate(withOnly(in.KcalOverride, nil), year); err != nil {
+			calc.KcalOverride = nil
 			overrideErr = overrideCode(err, overrideErr)
 		}
 	}
 	if in.ProteinOverrideG != nil {
-		if _, err := Calculate(Input{Sex: in.Sex, BirthYear: in.BirthYear, HeightCm: in.HeightCm, WeightKg: in.WeightKg,
-			ActivityLevel: in.ActivityLevel, Goal: in.Goal, GoalWeightKg: in.GoalWeightKg, ProteinOverrideG: in.ProteinOverrideG}, year); err != nil {
-			checked.ProteinOverrideG = nil
+		if _, err := Calculate(withOnly(nil, in.ProteinOverrideG), year); err != nil {
+			calc.ProteinOverrideG = nil
 			overrideErr = overrideCode(err, overrideErr)
 		}
 	}
-	targets, err := Calculate(checked, year)
+	targets, err := Calculate(calc, year)
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not compute plan")
 		return
@@ -80,7 +88,7 @@ func (h Handler) GetPlan(c *gin.Context) {
 
 	// Echo the stored overrides, not the retried ones.
 	in.KcalOverride, in.ProteinOverrideG = u.TargetKcalOverride, u.TargetProteinOverrideG
-	httpx.OK(c, gin.H{"inputs": in, "targets": targets, "override_error": overrideErr})
+	httpx.OK(c, gin.H{"inputs": in, "targets": targets, "override_error": overrideErr, "input_error": inputErr})
 }
 
 // PutPlan re-saves the plan from the same body as POST /v1/onboarding. It
@@ -116,7 +124,13 @@ func (h Handler) PutPlan(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not save plan")
 		return
 	}
-	if d := in.WeightKg - current.WeightKg; d >= weightChangeEpsilonKg || d <= -weightChangeEpsilonKg {
+	// Compare with the weight GET reports (latest weigh-in), not users.weight_kg,
+	// or the first save after any tracked weigh-in would log a duplicate.
+	prev, err := h.currentWeight(ctx, current)
+	if err != nil {
+		prev = current.WeightKg
+	}
+	if d := in.WeightKg - prev; d >= weightChangeEpsilonKg || d <= -weightChangeEpsilonKg {
 		// Same isolation as Submit: the plan is saved, a failed weigh-in is logged.
 		h.recordWeighIn(ctx, userID, in.WeightKg, fields.Timezone, uuid.Nil)
 	}
@@ -130,4 +144,16 @@ func overrideCode(err error, first *string) *string {
 		return first
 	}
 	return &oe.Code
+}
+
+// currentWeight is the latest weigh-in, falling back to the profile weight.
+func (h Handler) currentWeight(ctx context.Context, u user.User) (float64, error) {
+	if h.weights == nil {
+		return u.WeightKg, nil
+	}
+	kg, found, err := h.weights.LatestWeightKg(ctx, u.ID)
+	if err != nil || !found {
+		return u.WeightKg, err
+	}
+	return kg, nil
 }

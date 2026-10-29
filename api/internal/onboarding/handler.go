@@ -196,6 +196,6 @@ func (h Handler) recordWeighIn(ctx context.Context, userID uuid.UUID, weightKg f
 		ID: id,
 	})
 	if err != nil {
-		slog.WarnContext(ctx, "onboarding: record first weigh-in failed", "err", err, "user_id", userID)
+		slog.WarnContext(ctx, "onboarding: record weigh-in failed", "err", err, "user_id", userID)
 	}
 }
