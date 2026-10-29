@@ -50,18 +50,30 @@ func (h Handler) GetPlan(c *gin.Context) {
 	}
 
 	year := h.now().Year()
-	calc := in
 	// A newer weight can break the stored destination (pace over 1% of
 	// bodyweight, goal already reached); the plan still has to load, so
-	// compute without the destination and say why in input_error.
+	// compute without the destination and say why in input_error. A weigh-in
+	// nothing can compute from (7.3 typed for 73, a child on a Health-synced
+	// scale) falls back to the profile weight the plan was saved with.
 	var inputErr *string
-	if _, err := Calculate(Input{Sex: in.Sex, BirthYear: in.BirthYear, HeightCm: in.HeightCm, WeightKg: in.WeightKg,
-		ActivityLevel: in.ActivityLevel, Goal: in.Goal, GoalWeightKg: in.GoalWeightKg, PaceKgPerWeek: in.PaceKgPerWeek}, year); err != nil {
-		msg := err.Error()
-		inputErr = &msg
-		calc.GoalWeightKg = 0
-		calc.PaceKgPerWeek = math.Min(calc.PaceKgPerWeek, in.WeightKg*maxPaceFractionOfBodyweight)
+	var calc Input
+	for _, w := range []float64{weight, u.WeightKg} {
+		calc = in
+		calc.WeightKg, calc.KcalOverride, calc.ProteinOverrideG = w, nil, nil
+		if _, err := Calculate(calc, year); err != nil {
+			if inputErr == nil {
+				msg := err.Error()
+				inputErr = &msg
+			}
+			calc.GoalWeightKg = 0
+			calc.PaceKgPerWeek = math.Min(calc.PaceKgPerWeek, w*maxPaceFractionOfBodyweight)
+		}
+		if _, err := Calculate(calc, year); err == nil {
+			break
+		}
 	}
+	calc.KcalOverride, calc.ProteinOverrideG = in.KcalOverride, in.ProteinOverrideG
+	in.WeightKg = calc.WeightKg
 
 	// Check each override against the full (fallback-applied) input and drop
 	// only the ones that fail, so a valid one survives; the first failing

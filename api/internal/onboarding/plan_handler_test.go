@@ -254,3 +254,16 @@ func TestGetPlanDropsProteinOverrideThatFailsShareAgainstKcalOverride(t *testing
 	require.Equal(t, 78.0, p.Data.Targets.Kcal)
 	require.NotZero(t, p.Data.Targets.ProteinG)
 }
+
+func TestGetPlanFallsBackToProfileWeightForOutOfRangeWeighIn(t *testing.T) {
+	e := newPlanEnv(t)
+	require.Equal(t, 200, e.do(t, "POST", "/v1/onboarding",
+		strings.Replace(planBody(73, `"goal_weight_kg":70,"pace_kg_per_week":0.5`), `"maintenance"`, `"fat_loss"`, 1)).Code)
+	e.addWeighIn(t, 5)
+
+	p := e.getPlan(t)
+	require.NotNil(t, p.Data.InputError)
+	require.NotZero(t, p.Data.Targets.Kcal)
+	require.Equal(t, 73.0, p.Data.Inputs.WeightKg)
+	require.Equal(t, 70.0, p.Data.Inputs.GoalWeightKg)
+}
