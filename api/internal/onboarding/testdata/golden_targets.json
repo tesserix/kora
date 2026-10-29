@@ -54,5 +54,55 @@
     "bmr": 1389.0, "tdee": 2152.9500000000003, "kcal": 1602.9500000000003,
     "protein_g": 122.4, "protein_g_per_kg": 1.8, "carbs_g": 178.15312500000007, "fat_g": 44.526388888888896,
     "floored": false
+  },
+  {
+    "name": "tester fat loss without a goal weight uses current weight",
+    "sex": "female", "age": 36, "height_cm": 160, "weight_kg": 73,
+    "activity_level": "light", "goal": "fat_loss", "pace_kg_per_week": 0.25,
+    "bmr": 1389.0, "tdee": 1909.875, "kcal": 1634.875,
+    "protein_g": 116.8, "protein_g_per_kg": 1.6, "carbs_g": 189.7390625, "fat_g": 45.41319444444444,
+    "floored": false
+  },
+  {
+    "name": "tester calorie override replaces the target",
+    "sex": "female", "age": 36, "height_cm": 160, "weight_kg": 73,
+    "activity_level": "light", "goal": "fat_loss", "pace_kg_per_week": 0.25, "goal_weight_kg": 68, "kcal_override": 1500,
+    "bmr": 1389.0, "tdee": 1909.875, "kcal": 1500.0,
+    "protein_g": 108.8, "protein_g_per_kg": 1.6, "carbs_g": 172.45, "fat_g": 41.666666666666664,
+    "floored": false
+  },
+  {
+    "name": "tester protein override replaces the target",
+    "sex": "female", "age": 36, "height_cm": 160, "weight_kg": 73,
+    "activity_level": "light", "goal": "fat_loss", "pace_kg_per_week": 0.25, "goal_weight_kg": 68, "protein_override_g": 125,
+    "bmr": 1389.0, "tdee": 1909.875, "kcal": 1634.875,
+    "protein_g": 125.0, "protein_g_per_kg": 1.6, "carbs_g": 181.5390625, "fat_g": 45.41319444444444,
+    "floored": false
+  },
+  {
+    "name": "calorie override below resting burn",
+    "sex": "female", "age": 36, "height_cm": 160, "weight_kg": 73,
+    "activity_level": "light", "goal": "fat_loss", "pace_kg_per_week": 0.25, "goal_weight_kg": 68, "kcal_override": 1388, "override_error": "kcal_below_resting_burn"
+  },
+  {
+    "name": "calorie override above twice TDEE",
+    "sex": "female", "age": 36, "height_cm": 160, "weight_kg": 73,
+    "activity_level": "light", "goal": "fat_loss", "pace_kg_per_week": 0.25, "goal_weight_kg": 68, "kcal_override": 3820, "override_error": "kcal_above_ceiling"
+  },
+  {
+    "name": "protein override below 0.8 g/kg",
+    "sex": "female", "age": 36, "height_cm": 160, "weight_kg": 73,
+    "activity_level": "light", "goal": "fat_loss", "pace_kg_per_week": 0.25, "goal_weight_kg": 68, "protein_override_g": 58.3, "override_error": "protein_below_min"
+  },
+  {
+    "name": "protein override above 2.5 g/kg",
+    "sex": "female", "age": 36, "height_cm": 160, "weight_kg": 73,
+    "activity_level": "light", "goal": "fat_loss", "pace_kg_per_week": 0.25, "goal_weight_kg": 68, "protein_override_g": 182.6, "override_error": "protein_above_max"
+  },
+  {
+    "name": "protein override over 75% of calories",
+    "sex": "female", "age": 60, "height_cm": 160, "weight_kg": 200,
+    "activity_level": "sedentary", "goal": "maintenance", "pace_kg_per_week": 0,
+    "kcal_override": 2539, "protein_override_g": 500, "override_error": "protein_exceeds_share"
   }
 ]

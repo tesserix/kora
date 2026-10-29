@@ -17,6 +17,11 @@ type Input struct {
 	// so requiring them here would reject a payload the UI cannot produce.
 	GoalWeightKg  float64 `json:"goal_weight_kg"`
 	PaceKgPerWeek float64 `json:"pace_kg_per_week"`
+
+	// Overrides replace the computed calorie and protein targets. nil means
+	// "use the computed value"; bounds are enforced in Calculate.
+	KcalOverride     *float64 `json:"target_kcal_override"`
+	ProteinOverrideG *float64 `json:"target_protein_override_g"`
 }
 
 type Targets struct {
@@ -36,7 +41,26 @@ type Targets struct {
 	// surface this to the user rather than silently showing a number
 	// that stopped obeying them.
 	Floored bool `json:"floored"`
+	// KcalOverridden and ProteinOverridden report that the user's own
+	// number replaced the computed one.
+	KcalOverridden    bool `json:"kcal_overridden"`
+	ProteinOverridden bool `json:"protein_overridden"`
 }
+
+// Override error codes. The strings are a contract with the HTTP handler and
+// the mobile Plan page (apps/mobile/src/lib/plan.ts OverrideCode).
+const (
+	CodeKcalBelowRestingBurn = "kcal_below_resting_burn"
+	CodeKcalAboveCeiling     = "kcal_above_ceiling"
+	CodeProteinBelowMin      = "protein_below_min"
+	CodeProteinAboveMax      = "protein_above_max"
+	CodeProteinExceedsShare  = "protein_exceeds_share"
+)
+
+// OverrideError reports an out-of-bounds calorie or protein override.
+type OverrideError struct{ Code string }
+
+func (e *OverrideError) Error() string { return "onboarding: invalid override: " + e.Code }
 
 var activityFactors = map[string]float64{
 	"sedentary":   1.2,
@@ -84,6 +108,17 @@ const (
 	// This is the primary safety limit; the BMR floor below is the backstop
 	// for anything that slips past it.
 	maxPaceFractionOfBodyweight = 0.01
+
+	// Override bounds: calories between resting burn and twice TDEE; protein
+	// between 0.8 and 2.5 g per kg of current weight and at most 75% of the
+	// effective calories.
+	maxKcalOverrideTdeeMultiple = 2.0
+	minProteinOverrideGPerKg    = 0.8
+	maxProteinOverrideGPerKg    = 2.5
+	maxProteinOverrideKcalShare = 0.75
+	// overrideEpsilon keeps a bound exactly on its edge (0.8 x 73 is
+	// 58.400000000000006 in float) from rejecting the value that names it.
+	overrideEpsilon = 1e-9
 )
 
 // proteinFactors is g/kg of the reference weight by goal then activity level.
@@ -201,10 +236,30 @@ func Calculate(in Input, currentYear int) (Targets, error) {
 	}
 	perKg := proteinFactor(in.Goal, in.ActivityLevel)
 	proteinG := perKg * refKg
-	carbsG, fatG := SplitMacros(kcal, proteinG)
-	return Targets{
-		Bmr: bmr, Tdee: tdee, Kcal: kcal,
-		ProteinG: proteinG, CarbsG: carbsG, FatG: fatG,
-		ProteinGPerKg: perKg, ProteinRefKg: refKg, Floored: floored,
-	}, nil
+
+	t := Targets{Bmr: bmr, Tdee: tdee, ProteinGPerKg: perKg, ProteinRefKg: refKg}
+	if o := in.KcalOverride; o != nil {
+		if *o < bmr-overrideEpsilon {
+			return Targets{}, &OverrideError{CodeKcalBelowRestingBurn}
+		}
+		if *o > tdee*maxKcalOverrideTdeeMultiple+overrideEpsilon {
+			return Targets{}, &OverrideError{CodeKcalAboveCeiling}
+		}
+		kcal, floored, t.KcalOverridden = *o, false, true
+	}
+	if o := in.ProteinOverrideG; o != nil {
+		if *o < minProteinOverrideGPerKg*in.WeightKg-overrideEpsilon {
+			return Targets{}, &OverrideError{CodeProteinBelowMin}
+		}
+		if *o > maxProteinOverrideGPerKg*in.WeightKg+overrideEpsilon {
+			return Targets{}, &OverrideError{CodeProteinAboveMax}
+		}
+		if *o*kcalPerGramMacro > maxProteinOverrideKcalShare*kcal+overrideEpsilon {
+			return Targets{}, &OverrideError{CodeProteinExceedsShare}
+		}
+		proteinG, t.ProteinOverridden = *o, true
+	}
+	t.Kcal, t.ProteinG, t.Floored = kcal, proteinG, floored
+	t.CarbsG, t.FatG = SplitMacros(kcal, proteinG)
+	return t, nil
 }

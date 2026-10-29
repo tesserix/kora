@@ -19,23 +19,26 @@ func approx(t *testing.T, want, got, tol float64) {
 // without the other turns the opposite language's suite red — that is the
 // point of the file.
 type goldenCase struct {
-	Name          string  `json:"name"`
-	Sex           string  `json:"sex"`
-	Age           int     `json:"age"`
-	HeightCm      float64 `json:"height_cm"`
-	WeightKg      float64 `json:"weight_kg"`
-	ActivityLevel string  `json:"activity_level"`
-	Goal          string  `json:"goal"`
-	PaceKgPerWeek float64 `json:"pace_kg_per_week"`
-	GoalWeightKg  float64 `json:"goal_weight_kg"`
-	Bmr           float64 `json:"bmr"`
-	Tdee          float64 `json:"tdee"`
-	Kcal          float64 `json:"kcal"`
-	ProteinG      float64 `json:"protein_g"`
-	ProteinGPerKg float64 `json:"protein_g_per_kg"`
-	CarbsG        float64 `json:"carbs_g"`
-	FatG          float64 `json:"fat_g"`
-	Floored       bool    `json:"floored"`
+	Name             string   `json:"name"`
+	Sex              string   `json:"sex"`
+	Age              int      `json:"age"`
+	HeightCm         float64  `json:"height_cm"`
+	WeightKg         float64  `json:"weight_kg"`
+	ActivityLevel    string   `json:"activity_level"`
+	Goal             string   `json:"goal"`
+	PaceKgPerWeek    float64  `json:"pace_kg_per_week"`
+	GoalWeightKg     float64  `json:"goal_weight_kg"`
+	KcalOverride     *float64 `json:"kcal_override"`
+	ProteinOverrideG *float64 `json:"protein_override_g"`
+	OverrideError    string   `json:"override_error"`
+	Bmr              float64  `json:"bmr"`
+	Tdee             float64  `json:"tdee"`
+	Kcal             float64  `json:"kcal"`
+	ProteinG         float64  `json:"protein_g"`
+	ProteinGPerKg    float64  `json:"protein_g_per_kg"`
+	CarbsG           float64  `json:"carbs_g"`
+	FatG             float64  `json:"fat_g"`
+	Floored          bool     `json:"floored"`
 }
 
 func TestCalculateMatchesGoldenVectors(t *testing.T) {
@@ -57,8 +60,19 @@ func TestCalculateMatchesGoldenVectors(t *testing.T) {
 				Goal:          c.Goal,
 				PaceKgPerWeek: c.PaceKgPerWeek,
 				GoalWeightKg:  c.GoalWeightKg,
+
+				KcalOverride:     c.KcalOverride,
+				ProteinOverrideG: c.ProteinOverrideG,
 			}, currentYear)
+			if c.OverrideError != "" {
+				var oe *OverrideError
+				require.ErrorAs(t, err, &oe)
+				require.Equal(t, c.OverrideError, oe.Code)
+				return
+			}
 			require.NoError(t, err)
+			require.Equal(t, c.KcalOverride != nil, got.KcalOverridden)
+			require.Equal(t, c.ProteinOverrideG != nil, got.ProteinOverridden)
 			approx(t, c.Kcal, got.Kcal, 0.001)
 			approx(t, c.ProteinG, got.ProteinG, 0.001)
 			approx(t, c.ProteinGPerKg, got.ProteinGPerKg, 0.0001)
@@ -310,4 +324,68 @@ func TestFatLossWithoutGoalWeightUsesCurrentWeight(t *testing.T) {
 	require.NoError(t, err)
 	approx(t, 116.8, got.ProteinG, 0.001)
 	require.Equal(t, 73.0, got.ProteinRefKg)
+}
+
+func withKcal(in Input, v float64) Input    { in.KcalOverride = &v; return in }
+func withProtein(in Input, v float64) Input { in.ProteinOverrideG = &v; return in }
+
+func requireOverrideErr(t *testing.T, in Input, code string) {
+	t.Helper()
+	_, err := Calculate(in, 2026)
+	var oe *OverrideError
+	require.ErrorAs(t, err, &oe)
+	require.Equal(t, code, oe.Code)
+}
+
+func TestKcalOverrideReplacesTarget(t *testing.T) {
+	got, err := Calculate(withKcal(fatLossTester("light", 0.25, 68), 1500), 2026)
+	require.NoError(t, err)
+	approx(t, 1500, got.Kcal, 1e-9)
+	approx(t, 1500*0.25/9, got.FatG, 1e-9)
+	approx(t, (1500-108.8*4-got.FatG*9)/4, got.CarbsG, 1e-9)
+	require.True(t, got.KcalOverridden)
+	require.False(t, got.ProteinOverridden)
+	require.False(t, got.Floored)
+}
+
+func TestKcalOverrideBounds(t *testing.T) {
+	base := fatLossTester("light", 0.25, 68)
+	requireOverrideErr(t, withKcal(base, 1388), "kcal_below_resting_burn")
+	requireOverrideErr(t, withKcal(base, 3820), "kcal_above_ceiling")
+	for _, v := range []float64{1389, 3819.75} {
+		_, err := Calculate(withKcal(base, v), 2026)
+		require.NoError(t, err, "%v", v)
+	}
+}
+
+func TestProteinOverrideReplacesTarget(t *testing.T) {
+	base, err := Calculate(fatLossTester("light", 0.25, 68), 2026)
+	require.NoError(t, err)
+	got, err := Calculate(withProtein(fatLossTester("light", 0.25, 68), 125), 2026)
+	require.NoError(t, err)
+	approx(t, 125, got.ProteinG, 1e-9)
+	approx(t, base.CarbsG-(125-108.8), got.CarbsG, 1e-9)
+	require.True(t, got.ProteinOverridden)
+	require.False(t, got.KcalOverridden)
+}
+
+func TestProteinOverrideBounds(t *testing.T) {
+	base := fatLossTester("light", 0.25, 68)
+	requireOverrideErr(t, withProtein(base, 58.3), "protein_below_min")
+	requireOverrideErr(t, withProtein(base, 182.6), "protein_above_max")
+	for _, v := range []float64{58.4, 182.5} {
+		_, err := Calculate(withProtein(base, v), 2026)
+		require.NoError(t, err, "%v", v)
+	}
+}
+
+func TestProteinOverrideShareUsesEffectiveKcal(t *testing.T) {
+	in := Input{
+		Sex: "female", BirthYear: 1966, HeightCm: 160, WeightKg: 200,
+		ActivityLevel: "sedentary", Goal: "maintenance",
+	}
+	in = withKcal(in, 2539)
+	requireOverrideErr(t, withProtein(in, 500), "protein_exceeds_share")
+	_, err := Calculate(withProtein(in, 470), 2026)
+	require.NoError(t, err)
 }

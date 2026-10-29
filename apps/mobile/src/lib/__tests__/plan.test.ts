@@ -12,6 +12,9 @@ type GoldenCase = {
   goal: PlanInput["goal"];
   pace_kg_per_week: number;
   goal_weight_kg?: number;
+  kcal_override?: number;
+  protein_override_g?: number;
+  override_error?: string;
   bmr: number;
   tdee: number;
   kcal: number;
@@ -39,7 +42,13 @@ describe("computePlan matches the Go golden vectors", () => {
       goal: c.goal,
       paceKgPerWeek: c.pace_kg_per_week,
       goalWeightKg: c.goal_weight_kg,
+      kcalOverride: c.kcal_override,
+      proteinOverrideG: c.protein_override_g,
     });
+    expect(plan.overrideError).toBe(c.override_error ?? null);
+    if (c.override_error) return;
+    expect(plan.kcalOverridden).toBe(c.kcal_override !== undefined);
+    expect(plan.proteinOverridden).toBe(c.protein_override_g !== undefined);
     expect(plan.bmr).toBeCloseTo(c.bmr, 6);
     expect(plan.tdee).toBeCloseTo(c.tdee, 6);
     expect(plan.kcal).toBeCloseTo(c.kcal, 6);
@@ -108,5 +117,21 @@ describe("computePlan guards", () => {
     const plan = computePlan({ sex: "female", age: 90, heightCm: 150, weightKg: 40, activityLevel: "sedentary", goal: "fat_loss", paceKgPerWeek: 0.4 });
     expect(plan.kcal).toBeCloseTo(plan.bmr, 6);
     expect(plan.floored).toBe(true);
+  });
+});
+
+describe("computePlan with a bad override", () => {
+  const tester: PlanInput = {
+    sex: "female", age: 36, heightCm: 160, weightKg: 73, activityLevel: "light",
+    goal: "fat_loss", paceKgPerWeek: 0.25, goalWeightKg: 68,
+  };
+  it("reports the error and returns the un-overridden numbers", () => {
+    const plain = computePlan(tester);
+    const plan = computePlan({ ...tester, kcalOverride: 1388, proteinOverrideG: 125 });
+    expect(plan.overrideError).toBe("kcal_below_resting_burn");
+    expect(plan.kcalOverridden).toBe(false);
+    expect(plan.proteinOverridden).toBe(false);
+    expect(plan.kcal).toBe(plain.kcal);
+    expect(plan.proteinG).toBe(plain.proteinG);
   });
 });

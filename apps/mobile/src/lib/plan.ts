@@ -21,7 +21,18 @@ export type PlanInput = {
   paceKgPerWeek: number;
   /** Reference weight for fat-loss protein; current weight is used when unset. */
   goalWeightKg?: number;
+  /** Replaces the computed calories / protein; null or undefined means no override. */
+  kcalOverride?: number | null;
+  proteinOverrideG?: number | null;
 };
+
+/** Mirrors the override error codes in calc.go; the Plan page maps each to copy. */
+export type OverrideCode =
+  | "kcal_below_resting_burn"
+  | "kcal_above_ceiling"
+  | "protein_below_min"
+  | "protein_above_max"
+  | "protein_exceeds_share";
 
 export type Plan = {
   bmr: number;
@@ -36,6 +47,10 @@ export type Plan = {
   fatG: number;
   /** True when the BMR floor bound — the target stopped obeying the user. */
   floored: boolean;
+  kcalOverridden: boolean;
+  proteinOverridden: boolean;
+  /** Set when an override was out of bounds; the numbers are then the un-overridden plan. */
+  overrideError: OverrideCode | null;
 };
 
 export const ACTIVITY_FACTORS: Record<ActivityLevel, number> = {
@@ -65,6 +80,31 @@ const MAX_PACE_FRACTION_OF_BODYWEIGHT = 0.01;
 const FAT_CALORIE_PCT = 0.25;
 const KCAL_PER_GRAM_FAT = 9;
 const KCAL_PER_GRAM_MACRO = 4;
+const MAX_KCAL_OVERRIDE_TDEE_MULTIPLE = 2;
+const MIN_PROTEIN_OVERRIDE_G_PER_KG = 0.8;
+const MAX_PROTEIN_OVERRIDE_G_PER_KG = 2.5;
+const MAX_PROTEIN_OVERRIDE_KCAL_SHARE = 0.75;
+// Keeps a value exactly on its bound (0.8 x 73 is 58.400000000000006) accepted.
+const OVERRIDE_EPSILON = 1e-9;
+
+// Check order matches calc.go: kcal bounds, protein min/max, then share.
+function overrideError(input: PlanInput, bmr: number, tdee: number, kcal: number): OverrideCode | null {
+  const k = input.kcalOverride;
+  if (k != null) {
+    if (k < bmr - OVERRIDE_EPSILON) return "kcal_below_resting_burn";
+    if (k > tdee * MAX_KCAL_OVERRIDE_TDEE_MULTIPLE + OVERRIDE_EPSILON) return "kcal_above_ceiling";
+  }
+  const p = input.proteinOverrideG;
+  if (p != null) {
+    if (p < MIN_PROTEIN_OVERRIDE_G_PER_KG * input.weightKg - OVERRIDE_EPSILON) return "protein_below_min";
+    if (p > MAX_PROTEIN_OVERRIDE_G_PER_KG * input.weightKg + OVERRIDE_EPSILON) return "protein_above_max";
+    const effectiveKcal = k ?? kcal;
+    if (p * KCAL_PER_GRAM_MACRO > MAX_PROTEIN_OVERRIDE_KCAL_SHARE * effectiveKcal + OVERRIDE_EPSILON) {
+      return "protein_exceeds_share";
+    }
+  }
+  return null;
+}
 
 /**
  * Computes energy and macro targets from user metrics.
@@ -95,21 +135,37 @@ export function computePlan(input: PlanInput): Plan {
   }
 
   const raw = tdee + adjustment;
-  const kcal = Math.max(bmr, raw);
+  let kcal = Math.max(bmr, raw);
+  let floored = kcal > raw;
 
   const proteinRefKg =
     input.goal === "fat_loss" && input.goalWeightKg && input.goalWeightKg > 0
       ? input.goalWeightKg
       : input.weightKg;
   const proteinGPerKg = proteinFactor(input.goal, input.activityLevel);
-  const proteinG = proteinGPerKg * proteinRefKg;
+  let proteinG = proteinGPerKg * proteinRefKg;
+
+  // A bad override is reported, not thrown, and the plan stays un-overridden
+  // so the screen can show both the error and the numbers it falls back to.
+  const error = overrideError(input, bmr, tdee, kcal);
+  const kcalOverridden = !error && input.kcalOverride != null;
+  const proteinOverridden = !error && input.proteinOverrideG != null;
+  if (kcalOverridden) {
+    kcal = input.kcalOverride as number;
+    floored = false;
+  }
+  if (proteinOverridden) proteinG = input.proteinOverrideG as number;
+
   const fatG = (kcal * FAT_CALORIE_PCT) / KCAL_PER_GRAM_FAT;
   const carbsG = Math.max(
     0,
     (kcal - proteinG * KCAL_PER_GRAM_MACRO - fatG * KCAL_PER_GRAM_FAT) / KCAL_PER_GRAM_MACRO,
   );
 
-  return { bmr, tdee, adjustment, kcal, proteinG, proteinGPerKg, proteinRefKg, carbsG, fatG, floored: kcal > raw };
+  return {
+    bmr, tdee, adjustment, kcal, proteinG, proteinGPerKg, proteinRefKg, carbsG, fatG, floored,
+    kcalOverridden, proteinOverridden, overrideError: error,
+  };
 }
 
 /**
