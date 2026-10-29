@@ -2,6 +2,7 @@ package onboarding
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math"
 	"net/http"
@@ -52,10 +53,55 @@ func (h Handler) Submit(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_input", "malformed onboarding body")
 		return
 	}
+	fields, herr := h.resolve(c.Request.Context(), in)
+	if herr != nil {
+		herr.write(c)
+		return
+	}
+	saved, err := h.users.SaveOnboarding(c.Request.Context(), userID, fields)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not save onboarding")
+		return
+	}
+
+	// The onboarding weight IS the user's real weight, so it becomes a real
+	// weigh-in alongside the profile field -- otherwise the Trends screen's
+	// weight card has nothing to show until the user logs one manually,
+	// while its "no weigh-ins yet" panel is simultaneously (and correctly)
+	// empty. See kora#45 / kora#314.
+	//
+	// Deliberately NOT part of the SaveOnboarding failure unit: this write
+	// is not in the same transaction, and its own failure does not fail the
+	// request. A user who cannot complete onboarding because a secondary
+	// weigh-in write failed is a far worse outcome than a missing first
+	// data point -- the profile weight is still saved, and the weigh-in is
+	// simply absent until they log one themselves. Logged and swallowed.
+	h.recordFirstWeighIn(c.Request.Context(), userID, in.WeightKg, fields.Timezone)
+
+	httpx.OK(c, saved)
+}
+
+// httpError is a request failure resolve can return for any handler in this
+// package to write out.
+type httpError struct {
+	status  int
+	code    string
+	message string
+}
+
+func (e *httpError) write(c *gin.Context) { httpx.Error(c, e.status, e.code, e.message) }
+
+// resolve turns a bound Input into the fields to persist: validated targets
+// (with any overrides), the derived target date and the plan basis weight. It
+// does no I/O beyond reading the clock, so Submit and the plan endpoint share it.
+func (h Handler) resolve(ctx context.Context, in Input) (user.OnboardingFields, *httpError) {
 	targets, err := Calculate(in, h.now().Year())
 	if err != nil {
-		httpx.Error(c, http.StatusBadRequest, "invalid_input", err.Error())
-		return
+		var oe *OverrideError
+		if errors.As(err, &oe) {
+			return user.OnboardingFields{}, &httpError{http.StatusBadRequest, "invalid_override", oe.Code}
+		}
+		return user.OnboardingFields{}, &httpError{http.StatusBadRequest, "invalid_input", err.Error()}
 	}
 	tz := in.Timezone
 	if tz == "" {
@@ -90,33 +136,15 @@ func (h Handler) Submit(c *gin.Context) {
 			paceKgPerWeek = in.PaceKgPerWeek
 		}
 	}
-	saved, err := h.users.SaveOnboarding(c.Request.Context(), userID, user.OnboardingFields{
+	return user.OnboardingFields{
 		Sex: in.Sex, BirthYear: in.BirthYear, HeightCm: in.HeightCm, WeightKg: in.WeightKg,
 		ActivityLevel: in.ActivityLevel, Goal: in.Goal, Timezone: tz,
 		TargetKcal: targets.Kcal, TargetProteinG: targets.ProteinG,
 		TargetCarbsG: targets.CarbsG, TargetFatG: targets.FatG,
 		GoalWeightKg: goalWeightKg, PaceKgPerWeek: paceKgPerWeek, TargetDate: targetDate,
-	})
-	if err != nil {
-		httpx.Error(c, http.StatusInternalServerError, "internal_error", "could not save onboarding")
-		return
-	}
-
-	// The onboarding weight IS the user's real weight, so it becomes a real
-	// weigh-in alongside the profile field -- otherwise the Trends screen's
-	// weight card has nothing to show until the user logs one manually,
-	// while its "no weigh-ins yet" panel is simultaneously (and correctly)
-	// empty. See kora#45 / kora#314.
-	//
-	// Deliberately NOT part of the SaveOnboarding failure unit: this write
-	// is not in the same transaction, and its own failure does not fail the
-	// request. A user who cannot complete onboarding because a secondary
-	// weigh-in write failed is a far worse outcome than a missing first
-	// data point -- the profile weight is still saved, and the weigh-in is
-	// simply absent until they log one themselves. Logged and swallowed.
-	h.recordFirstWeighIn(c.Request.Context(), userID, in.WeightKg, tz)
-
-	httpx.OK(c, saved)
+		TargetKcalOverride: in.KcalOverride, TargetProteinOverrideG: in.ProteinOverrideG,
+		PlanBasisWeightKg: in.WeightKg,
+	}, nil
 }
 
 // recordFirstWeighIn writes the onboarding weight as a weight_entries row.
