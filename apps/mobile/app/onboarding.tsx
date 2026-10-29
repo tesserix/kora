@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useWindowDimensions, View } from "react-native";
-import { router, useLocalSearchParams, type Href } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { AppText } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Overline } from "@/components/Overline";
@@ -367,19 +367,10 @@ export default function Onboarding() {
       }
     }
     const draftParams = draftToParams(input);
-    // shortcut: `as unknown as Href` because the generated typed-routes file
-    // (.expo/types, gitignored) has no /plan until Task 9 adds app/plan.tsx and
-    // the dev server regenerates it; drop the cast then.
     if (isEdit) {
-      router.navigate({
-        pathname: "/plan",
-        params: { ...draftParams, mode: "edit" },
-      } as unknown as Href);
+      router.navigate({ pathname: "/plan", params: { ...draftParams, mode: "edit" } });
     } else {
-      router.push({
-        pathname: "/plan",
-        params: { ...draftParams, mode: "onboarding" },
-      } as unknown as Href);
+      router.push({ pathname: "/plan", params: { ...draftParams, mode: "onboarding" } });
     }
   }
 

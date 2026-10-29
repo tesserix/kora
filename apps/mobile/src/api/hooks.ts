@@ -277,10 +277,12 @@ export function useSubmitOnboarding() {
   });
 }
 
-export function usePlan(): UseQueryResult<PlanResponse, Error> {
+// `enabled: false` while onboarding: GET answers 409 until a plan exists.
+export function usePlan({ enabled = true }: { enabled?: boolean } = {}): UseQueryResult<PlanResponse, Error> {
   return useQuery({
     queryKey: ["plan"],
     queryFn: () => apiFetch("/v1/me/plan") as Promise<PlanResponse>,
+    enabled,
   });
 }
 
