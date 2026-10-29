@@ -83,6 +83,7 @@ import type {
   MyHandle,
   ShareCategory,
   OnboardingInput,
+  PlanResponse,
   LogRecipeResult,
   PinnedFood,
   Profile,
@@ -273,6 +274,26 @@ export function useSubmitOnboarding() {
     // refetch lands. /v1/onboarding returns the same full user row as /v1/me, so
     // the response is safe to use as the profile outright.
     onSuccess: (profile) => qc.setQueryData(["profile"], profile),
+  });
+}
+
+export function usePlan(): UseQueryResult<PlanResponse, Error> {
+  return useQuery({
+    queryKey: ["plan"],
+    queryFn: () => apiFetch("/v1/me/plan") as Promise<PlanResponse>,
+  });
+}
+
+export function useSavePlan(): UseMutationResult<Profile, Error, OnboardingInput> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: OnboardingInput) =>
+      apiFetch("/v1/me/plan", { method: "PUT", body: JSON.stringify(input) }) as Promise<Profile>,
+    // Seed the profile like useSubmitOnboarding; PUT returns the same user row as /v1/me.
+    onSuccess: (profile) => {
+      qc.setQueryData(["profile"], profile);
+      return qc.invalidateQueries({ queryKey: ["plan"] });
+    },
   });
 }
 
