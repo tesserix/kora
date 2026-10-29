@@ -308,9 +308,13 @@ export default function PlanScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
+      {/* iOS: insets the scroll so Otto's input, near the bottom, can sit
+          above the keyboard. Android's windowSoftInputMode already resizes. */}
       <ScrollView
+        testID="plan-scroll"
         style={{ flex: 1 }}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
         contentContainerStyle={{
           paddingTop: insets.top + 8,
           paddingBottom: insets.bottom + 40,

@@ -347,6 +347,12 @@ describe("plan page", () => {
     expect(screen.getByTestId("protein-basis")).toHaveTextContent("1.8 g/kg goal wt");
   });
 
+  it("the page scrolls a focused input above the iOS keyboard", async () => {
+    // Otto's input sits near the bottom of the scroll content.
+    await render(<Plan />);
+    expect(screen.getByTestId("plan-scroll").props.automaticallyAdjustKeyboardInsets).toBe(true);
+  });
+
   it("a missing draft in onboarding mode returns to onboarding", async () => {
     mockParams = { mode: "onboarding", sex: "male" };
     await render(<Plan />);
