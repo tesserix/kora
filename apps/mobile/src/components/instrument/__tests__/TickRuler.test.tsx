@@ -934,3 +934,145 @@ describe("TickRuler continuous edge fade (kora#286)", () => {
     });
   });
 });
+
+// Onboarding starts with nothing pre-selected. kora#164 is why this is so
+// specific: the rulers once opened on real-looking values (30 / 170 / 70) that
+// did not count, nothing said to drag, and people could not proceed. So an
+// unset ruler shows no numeral, a single tap commits the rest value, and
+// VoiceOver adjusts from the rest value.
+describe("TickRuler unset state", () => {
+  const unset = { ...base, value: null, restValue: 70 };
+
+  it("tap on an unset ruler commits the rest value", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...unset} onChange={onChange} />);
+    // A tap never activates the Pan (it needs 10pt of horizontal travel), so
+    // the commit has to come from a gesture that does fire on a tap.
+    fireGestureHandler(getByGestureTestId("weight-ruler-tap"));
+    expect(onChange).toHaveBeenCalledWith(70);
+  });
+
+  it("a zero-translation pan end on an unset ruler commits the rest value", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...unset} onChange={onChange} />);
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [{ translationX: 0 }]);
+    expect(onChange).toHaveBeenCalledWith(70);
+  });
+
+  it("drags from the rest value", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...unset} onChange={onChange} />);
+    fireGestureHandler(getByGestureTestId("weight-ruler-pan"), [
+      { translationX: 0 },
+      { translationX: -18 },
+    ]);
+    expect(onChange).toHaveBeenLastCalledWith(72);
+  });
+
+  // The tap exists only for the unset state; on a set ruler it must not
+  // re-report the value the user already chose.
+  it("ignores a tap once the ruler is set", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...base} value={84} onChange={onChange} />);
+    fireGestureHandler(getByGestureTestId("weight-ruler-tap"));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('an unset ruler shows "Slide to set" and no numeral', async () => {
+    await render(<TickRuler {...unset} unit="kg" onChange={jest.fn()} />);
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("Slide to set");
+    expect(screen.getByTestId("weight-ruler").props.accessibilityValue).toEqual({
+      text: "Not set",
+    });
+    // The graduation under the index would read as the value, which is the
+    // exact kora#164 failure, so the scale draws no numbers either.
+    expect(screen.queryAllByTestId(/^weight-ruler-label-/)).toHaveLength(0);
+    expect(screen.getByTestId("weight-ruler-unset-well")).toBeTruthy();
+  });
+
+  it("takes a custom unset label", async () => {
+    await render(<TickRuler {...unset} unsetLabel="Drag to set" onChange={jest.fn()} />);
+    expect(screen.getByTestId("weight-ruler-readout").props.children).toBe("Drag to set");
+  });
+
+  it("increment on an unset ruler reports rest + step", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...unset} onChange={onChange} />);
+    fireEvent(screen.getByTestId("weight-ruler"), "accessibilityAction", {
+      nativeEvent: { actionName: "increment" },
+    });
+    expect(onChange).toHaveBeenCalledWith(70.5);
+  });
+
+  it("decrement on an unset ruler reports rest - step", async () => {
+    const onChange = jest.fn();
+    await render(<TickRuler {...unset} onChange={onChange} />);
+    fireEvent(screen.getByTestId("weight-ruler"), "accessibilityAction", {
+      nativeEvent: { actionName: "decrement" },
+    });
+    expect(onChange).toHaveBeenCalledWith(69.5);
+  });
+
+  it("an unset detented ruler shows no selected stop and a tap reports restIndex", async () => {
+    const onChange = jest.fn();
+    await render(
+      <>
+        <TickRuler
+          mode="detented"
+          index={null}
+          restIndex={2}
+          labels={ACTIVITY}
+          accessibilityLabel="Activity level"
+          testID="activity-ruler"
+          onChange={onChange}
+        />
+        {/* A set twin, so "selected" is read off the real styling. */}
+        <TickRuler
+          mode="detented"
+          index={2}
+          labels={ACTIVITY}
+          accessibilityLabel="Activity level"
+          testID="set-ruler"
+          onChange={jest.fn()}
+        />
+      </>,
+    );
+    const selectedWidth = screen.getByTestId("set-ruler-stop-2").props.strokeWidth;
+    ACTIVITY.forEach((_, i) => {
+      expect(screen.getByTestId(`activity-ruler-stop-${i}`).props.strokeWidth).not.toBe(
+        selectedWidth,
+      );
+    });
+    expect(screen.getByTestId("activity-ruler").props.accessibilityValue).toEqual({
+      text: "Not set",
+    });
+    fireGestureHandler(getByGestureTestId("activity-ruler-tap"));
+    expect(onChange).toHaveBeenCalledWith(2);
+  });
+
+  it("adjusts an unset detented ruler from restIndex", async () => {
+    const onChange = jest.fn();
+    await render(
+      <TickRuler
+        mode="detented"
+        index={null}
+        restIndex={2}
+        labels={ACTIVITY}
+        accessibilityLabel="Activity level"
+        testID="activity-ruler"
+        onChange={onChange}
+      />,
+    );
+    fireEvent(screen.getByTestId("activity-ruler"), "accessibilityAction", {
+      nativeEvent: { actionName: "decrement" },
+    });
+    expect(onChange).toHaveBeenCalledWith(1);
+  });
+
+  it("makes a missing rest value a type error", () => {
+    // @ts-expect-error -- value null needs a restValue
+    void (<TickRuler {...base} value={null} onChange={jest.fn()} />);
+    // @ts-expect-error -- index null needs a restIndex
+    void (<TickRuler mode="detented" index={null} labels={ACTIVITY} accessibilityLabel="a" onChange={jest.fn()} />);
+  });
+});
