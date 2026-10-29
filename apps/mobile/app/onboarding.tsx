@@ -44,12 +44,12 @@ import {
   type PlanGoal,
 } from "@/lib/plan";
 
-const GOAL_IDS: readonly PlanGoal[] = [
+export const GOAL_IDS: readonly PlanGoal[] = [
   "fat_loss",
   "maintenance",
   "muscle_gain",
 ];
-const GOAL_LABELS = ["Lose weight", "Maintain", "Build muscle"] as const;
+export const GOAL_LABELS = ["Lose weight", "Maintain", "Build muscle"] as const;
 const GOAL_CAPTIONS = [
   "Gentle calorie deficit",
   "Stay where you are",
@@ -61,14 +61,14 @@ const SEX_OPTIONS: Array<{ key: OnboardingInput["sex"]; label: string }> = [
   { key: "female", label: "Female" },
 ];
 
-const ACTIVITY_IDS: readonly ActivityLevel[] = [
+export const ACTIVITY_IDS: readonly ActivityLevel[] = [
   "sedentary",
   "light",
   "moderate",
   "active",
   "very_active",
 ];
-const ACTIVITY_LABELS = [
+export const ACTIVITY_LABELS = [
   "Sedentary",
   "Light",
   "Moderate",

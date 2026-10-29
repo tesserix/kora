@@ -9,12 +9,15 @@ export function AskInput({
   pending,
   onChangeText,
   onSend,
+  ink = false,
 }: {
   value: string;
   disabled: boolean;
   pending: boolean;
   onChangeText: (value: string) => void;
   onSend: () => void;
+  // For screens whose one orange moment is already spent elsewhere (Plan).
+  ink?: boolean;
 }) {
   const { instrument, fonts } = useTheme();
   const sendDisabled = disabled || pending || value.trim().length === 0;
@@ -53,9 +56,9 @@ export function AskInput({
         disabled={sendDisabled}
         haptic="impactLight"
         onPress={onSend}
-        style={{ width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: instrument.accent, opacity: sendDisabled ? 0.45 : 1 }}
+        style={{ width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: ink ? instrument.ink : instrument.accent, opacity: sendDisabled ? 0.45 : 1 }}
       >
-        <Icon name="arrow-up" size={18} color={instrument.accentOn} />
+        <Icon name="arrow-up" size={18} color={ink ? instrument.bg : instrument.accentOn} />
       </PressableScale>
     </View>
   );

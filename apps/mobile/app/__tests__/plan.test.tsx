@@ -13,6 +13,7 @@ jest.mock("expo-router", () => ({
     push: jest.fn(),
     back: jest.fn(),
     canGoBack: jest.fn(() => true),
+    setParams: jest.fn(),
   },
   useLocalSearchParams: () => mockParams,
 }));
@@ -43,6 +44,15 @@ jest.mock("@/api/hooks", () => ({
   useSavePlan: () => ({ mutate: mockSave, isPending: false }),
   usePlan: (...a: unknown[]) => mockUsePlan(...a),
   useProfile: () => ({ data: mockProfile, error: mockProfileError, refetch: mockRefetch }),
+}));
+
+// PlanOtto has its own tests; here only the onUse it is handed matters.
+let mockOnUse: ((d: PlanDraft) => void) | undefined;
+jest.mock("@/components/plan/PlanOtto", () => ({
+  PlanOtto: (props: { onUse: (d: PlanDraft) => void }) => {
+    mockOnUse = props.onUse;
+    return null;
+  },
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -319,6 +329,22 @@ describe("plan page", () => {
     // Targets ignore the broken destination, like the server's.
     expect(screen.getByTestId("protein-basis")).toHaveTextContent("1.8 g/kg body wt");
     expect(primary().props.accessibilityState.disabled).toBe(true);
+  });
+
+  it("use this replaces draft and clears typed overrides", async () => {
+    await render(<Plan />);
+    await typeProtein("150");
+    const { target_protein_override_g: _p, ...rest } = DRAFT;
+    await act(() => mockOnUse!({ ...rest, activity_level: "light" }));
+    expect(router.setParams).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target_protein_override_g: undefined,
+        activity_level: "light",
+        mode: "onboarding",
+      }),
+    );
+    // The typed 150 no longer shadows the draft's (absent) override.
+    expect(screen.getByTestId("protein-basis")).toHaveTextContent("1.8 g/kg goal wt");
   });
 
   it("a missing draft in onboarding mode returns to onboarding", async () => {

@@ -15,6 +15,7 @@ import {
 } from "@/components/instrument/DerivationChain";
 import { engravedStyle, monoStyle } from "@/components/instrument/typography";
 import { GroupedSection, Row } from "@/components/GroupedList";
+import { PlanOtto } from "@/components/plan/PlanOtto";
 import { PressableScale, haptics } from "@/motion";
 import {
   usePlan,
@@ -182,6 +183,22 @@ export default function PlanScreen() {
     } else {
       save.mutate(payload, { onSuccess: () => safeBack("/profile"), onError });
     }
+  }
+
+  function applyProposal(next: PlanDraft) {
+    setKcalText(undefined);
+    setProteinText(undefined);
+    setEditing(null);
+    // setParams merges, so a field the proposal cleared must be set to
+    // undefined; draftFromParams then reads it as absent.
+    router.setParams({
+      goal_weight_kg: undefined,
+      pace_kg_per_week: undefined,
+      target_kcal_override: undefined,
+      target_protein_override_g: undefined,
+      ...draftToParams(next),
+      mode: params.mode ?? "edit",
+    });
   }
 
   function clearOverride(field: Field) {
@@ -412,6 +429,8 @@ export default function PlanScreen() {
               </AppText>
             ) : null}
           </View>
+
+          <PlanOtto draft={payload} onUse={applyProposal} />
 
           {profile.error && profileUnknown ? (
             <View
