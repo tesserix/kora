@@ -9,7 +9,8 @@
 
 export type PlanGoal = "fat_loss" | "maintenance" | "muscle_gain";
 
-export type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "very_active";
+export type ActivityLevel =
+  "sedentary" | "light" | "moderate" | "active" | "very_active";
 
 export type PlanInput = {
   sex: "male" | "female";
@@ -63,9 +64,27 @@ export const ACTIVITY_FACTORS: Record<ActivityLevel, number> = {
 
 // g/kg of the reference weight, by goal then activity level (mirrors calc.go).
 const PROTEIN_FACTORS: Record<PlanGoal, Record<ActivityLevel, number>> = {
-  fat_loss: { sedentary: 1.6, light: 1.6, moderate: 1.8, active: 1.8, very_active: 1.8 },
-  maintenance: { sedentary: 1.2, light: 1.4, moderate: 1.6, active: 1.6, very_active: 1.6 },
-  muscle_gain: { sedentary: 1.8, light: 1.8, moderate: 2.0, active: 2.0, very_active: 2.0 },
+  fat_loss: {
+    sedentary: 1.6,
+    light: 1.6,
+    moderate: 1.8,
+    active: 1.8,
+    very_active: 1.8,
+  },
+  maintenance: {
+    sedentary: 1.2,
+    light: 1.4,
+    moderate: 1.6,
+    active: 1.6,
+    very_active: 1.6,
+  },
+  muscle_gain: {
+    sedentary: 1.8,
+    light: 1.8,
+    moderate: 2.0,
+    active: 2.0,
+    very_active: 2.0,
+  },
 };
 
 export function proteinFactor(goal: PlanGoal, activity: ActivityLevel): number {
@@ -91,17 +110,30 @@ const OVERRIDE_EPSILON = 1e-9;
 // Non-finite values (a blank field parsed to NaN) fail the first bound of
 // their kind, as in calc.go.
 function kcalError(k: number, bmr: number, tdee: number): OverrideCode | null {
-  if (!Number.isFinite(k) || k < bmr - OVERRIDE_EPSILON) return "kcal_below_resting_burn";
-  if (k > tdee * MAX_KCAL_OVERRIDE_TDEE_MULTIPLE + OVERRIDE_EPSILON) return "kcal_above_ceiling";
+  if (!Number.isFinite(k) || k < bmr - OVERRIDE_EPSILON)
+    return "kcal_below_resting_burn";
+  if (k > tdee * MAX_KCAL_OVERRIDE_TDEE_MULTIPLE + OVERRIDE_EPSILON)
+    return "kcal_above_ceiling";
   return null;
 }
 
-function proteinError(p: number, weightKg: number, effectiveKcal: number): OverrideCode | null {
-  if (!Number.isFinite(p) || p < MIN_PROTEIN_OVERRIDE_G_PER_KG * weightKg - OVERRIDE_EPSILON) {
+function proteinError(
+  p: number,
+  weightKg: number,
+  effectiveKcal: number,
+): OverrideCode | null {
+  if (
+    !Number.isFinite(p) ||
+    p < MIN_PROTEIN_OVERRIDE_G_PER_KG * weightKg - OVERRIDE_EPSILON
+  ) {
     return "protein_below_min";
   }
-  if (p > MAX_PROTEIN_OVERRIDE_G_PER_KG * weightKg + OVERRIDE_EPSILON) return "protein_above_max";
-  if (p * KCAL_PER_GRAM_MACRO > MAX_PROTEIN_OVERRIDE_KCAL_SHARE * effectiveKcal + OVERRIDE_EPSILON) {
+  if (p > MAX_PROTEIN_OVERRIDE_G_PER_KG * weightKg + OVERRIDE_EPSILON)
+    return "protein_above_max";
+  if (
+    p * KCAL_PER_GRAM_MACRO >
+    MAX_PROTEIN_OVERRIDE_KCAL_SHARE * effectiveKcal + OVERRIDE_EPSILON
+  ) {
     return "protein_exceeds_share";
   }
   return null;
@@ -125,7 +157,8 @@ export function computePlan(input: PlanInput): Plan {
   const paceKgPerWeek = Math.max(0, input.paceKgPerWeek);
 
   const sexOffset = input.sex === "male" ? 5 : -161;
-  const bmr = 10 * input.weightKg + 6.25 * input.heightCm - 5 * input.age + sexOffset;
+  const bmr =
+    10 * input.weightKg + 6.25 * input.heightCm - 5 * input.age + sexOffset;
   const tdee = bmr * ACTIVITY_FACTORS[input.activityLevel];
 
   let adjustment = 0;
@@ -149,14 +182,19 @@ export function computePlan(input: PlanInput): Plan {
   // A bad override is reported, not thrown, and only the failing one is
   // dropped: a valid override is never lost because the other was bad. A
   // surviving protein override is re-checked against the kcal actually used.
-  const kcalErr = input.kcalOverride != null ? kcalError(input.kcalOverride, bmr, tdee) : null;
+  const kcalErr =
+    input.kcalOverride != null
+      ? kcalError(input.kcalOverride, bmr, tdee)
+      : null;
   const kcalOverridden = input.kcalOverride != null && !kcalErr;
   if (kcalOverridden) {
     kcal = input.kcalOverride as number;
     floored = false;
   }
   const proteinErr =
-    input.proteinOverrideG != null ? proteinError(input.proteinOverrideG, input.weightKg, kcal) : null;
+    input.proteinOverrideG != null
+      ? proteinError(input.proteinOverrideG, input.weightKg, kcal)
+      : null;
   const proteinOverridden = input.proteinOverrideG != null && !proteinErr;
   if (proteinOverridden) proteinG = input.proteinOverrideG as number;
   const error = proteinErr ?? kcalErr;
@@ -164,12 +202,24 @@ export function computePlan(input: PlanInput): Plan {
   const fatG = (kcal * FAT_CALORIE_PCT) / KCAL_PER_GRAM_FAT;
   const carbsG = Math.max(
     0,
-    (kcal - proteinG * KCAL_PER_GRAM_MACRO - fatG * KCAL_PER_GRAM_FAT) / KCAL_PER_GRAM_MACRO,
+    (kcal - proteinG * KCAL_PER_GRAM_MACRO - fatG * KCAL_PER_GRAM_FAT) /
+      KCAL_PER_GRAM_MACRO,
   );
 
   return {
-    bmr, tdee, adjustment, kcal, proteinG, proteinGPerKg, proteinRefKg, carbsG, fatG, floored,
-    kcalOverridden, proteinOverridden, overrideError: error,
+    bmr,
+    tdee,
+    adjustment,
+    kcal,
+    proteinG,
+    proteinGPerKg,
+    proteinRefKg,
+    carbsG,
+    fatG,
+    floored,
+    kcalOverridden,
+    proteinOverridden,
+    overrideError: error,
   };
 }
 
@@ -187,7 +237,11 @@ export function availablePaces(weightKg: number): number[] {
 }
 
 /** Whole weeks to cover the distance, rounded up. Zero when already there. */
-export function weeksToGoal(weightKg: number, goalWeightKg: number, paceKgPerWeek: number): number {
+export function weeksToGoal(
+  weightKg: number,
+  goalWeightKg: number,
+  paceKgPerWeek: number,
+): number {
   const distance = Math.abs(goalWeightKg - weightKg);
   if (distance === 0 || paceKgPerWeek <= 0) return 0;
   return Math.ceil(distance / paceKgPerWeek);

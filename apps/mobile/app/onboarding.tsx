@@ -7,19 +7,34 @@ import { Overline } from "@/components/Overline";
 import { SegmentedGlass } from "@/components/instrument/SegmentedGlass";
 import { Numeral } from "@/components/Numeral";
 import { safeBack } from "@/lib/safeBack";
-import { AuthScaffold, HEADER_SCROLLS_ABOVE_FONT_SCALE } from "@/components/AuthScaffold";
+import {
+  AuthScaffold,
+  HEADER_SCROLLS_ABOVE_FONT_SCALE,
+} from "@/components/AuthScaffold";
 import { ActivityFromHealth } from "@/components/ActivityFromHealth";
 import { useActivityHistory } from "@/health/useActivityHistory";
 import { TickRuler } from "@/components/instrument/TickRuler";
 import { PlanDial } from "@/components/instrument/PlanDial";
 import { PlanDelta } from "@/components/instrument/PlanDelta";
-import { DerivationChain, type DerivationRow } from "@/components/instrument/DerivationChain";
+import {
+  DerivationChain,
+  type DerivationRow,
+} from "@/components/instrument/DerivationChain";
 import type { OnboardingInput } from "@/api/types";
 import { useTheme } from "@/theme";
-import { validateGoalWeight, validateOnboardingNumbers } from "@/lib/validateOnboarding";
+import {
+  validateGoalWeight,
+  validateOnboardingNumbers,
+} from "@/lib/validateOnboarding";
 import { deriveGoalWeightKg } from "@/lib/goalWeightDefault";
 import { draftFromParams, draftToParams } from "@/lib/planDraft";
-import { CM_PER_IN, kgFromLb, lbFromKg, useUnits, weightUnitLabel } from "@/units";
+import {
+  CM_PER_IN,
+  kgFromLb,
+  lbFromKg,
+  useUnits,
+  weightUnitLabel,
+} from "@/units";
 import {
   ACTIVITY_FACTORS,
   availablePaces,
@@ -29,9 +44,17 @@ import {
   type PlanGoal,
 } from "@/lib/plan";
 
-const GOAL_IDS: readonly PlanGoal[] = ["fat_loss", "maintenance", "muscle_gain"];
+const GOAL_IDS: readonly PlanGoal[] = [
+  "fat_loss",
+  "maintenance",
+  "muscle_gain",
+];
 const GOAL_LABELS = ["Lose weight", "Maintain", "Build muscle"] as const;
-const GOAL_CAPTIONS = ["Gentle calorie deficit", "Stay where you are", "Lean surplus + protein"];
+const GOAL_CAPTIONS = [
+  "Gentle calorie deficit",
+  "Stay where you are",
+  "Lean surplus + protein",
+];
 
 const SEX_OPTIONS: Array<{ key: OnboardingInput["sex"]; label: string }> = [
   { key: "male", label: "Male" },
@@ -45,7 +68,13 @@ const ACTIVITY_IDS: readonly ActivityLevel[] = [
   "active",
   "very_active",
 ];
-const ACTIVITY_LABELS = ["Sedentary", "Light", "Moderate", "Active", "Very active"] as const;
+const ACTIVITY_LABELS = [
+  "Sedentary",
+  "Light",
+  "Moderate",
+  "Active",
+  "Very active",
+] as const;
 const ACTIVITY_CAPTIONS = [
   "Desk job, little walking",
   "1–2 sessions a week",
@@ -75,11 +104,14 @@ const ACTIVITY_REST = 2;
 const GOAL_REST = 0;
 const PACE_REST = 1;
 
-const ACTIVITY_UNSET_CAPTION = "Pick one: this changes your calories by up to ~500 kcal";
+const ACTIVITY_UNSET_CAPTION =
+  "Pick one: this changes your calories by up to ~500 kcal";
 
 /** "a", "a and b", "a, b and c". */
 function listOf(items: readonly string[]): string {
-  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+  return items.length < 2
+    ? items.join("")
+    : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
 /**
@@ -128,22 +160,30 @@ export default function Onboarding() {
   // Edit mode arrives from /plan with the current draft. Read once: the draft
   // seeds the rulers and a later param change must not reset what the user did.
   // A draft that fails validation is ignored and the screen starts unset.
-  const [seed] = useState(() => (params.mode === "edit" ? draftFromParams(params) : null));
+  const [seed] = useState(() =>
+    params.mode === "edit" ? draftFromParams(params) : null,
+  );
   const isEdit = seed !== null;
 
   // The screen holds no defaults: a tap sets a ruler's rest value, and kora#164's displayed-but-unaccepted trap cannot occur because nothing is displayed until it is set.
   const [goalIndex, setGoalIndex] = useState<number | null>(
     seed ? GOAL_IDS.indexOf(seed.goal) : null,
   );
-  const [sex, setSex] = useState<OnboardingInput["sex"] | null>(seed?.sex ?? null);
+  const [sex, setSex] = useState<OnboardingInput["sex"] | null>(
+    seed?.sex ?? null,
+  );
   const [activityIndex, setActivityIndex] = useState<number | null>(
     seed ? ACTIVITY_IDS.indexOf(seed.activity_level) : null,
   );
   const [age, setAge] = useState<number | null>(
     seed ? new Date().getFullYear() - seed.birth_year : null,
   );
-  const [heightCm, setHeightCm] = useState<number | null>(seed?.height_cm ?? null);
-  const [weightKg, setWeightKg] = useState<number | null>(seed?.weight_kg ?? null);
+  const [heightCm, setHeightCm] = useState<number | null>(
+    seed?.height_cm ?? null,
+  );
+  const [weightKg, setWeightKg] = useState<number | null>(
+    seed?.weight_kg ?? null,
+  );
   // `null` until the user sets a destination. Its rest position is derived
   // from goal and weight (below); the user's number, once set, is never
   // recomputed under them. The server reports "no destination" as 0.
@@ -157,7 +197,9 @@ export default function Onboarding() {
   });
   // Two error slots, not one: each validation error renders under its own field.
   const [detailsError, setDetailsError] = useState<string | null>(null);
-  const [goalWeightErrorMsg, setGoalWeightErrorMsg] = useState<string | null>(null);
+  const [goalWeightErrorMsg, setGoalWeightErrorMsg] = useState<string | null>(
+    null,
+  );
   // The only evidence the user acted, for PlanDelta: incremented on every
   // input change, including ones where the resting-burn clamp leaves kcal
   // itself unchanged.
@@ -166,7 +208,8 @@ export default function Onboarding() {
   const bump = useCallback(() => setRevision((r) => r + 1), []);
 
   const goal = goalIndex === null ? null : GOAL_IDS[goalIndex];
-  const activityLevel = activityIndex === null ? null : ACTIVITY_IDS[activityIndex];
+  const activityLevel =
+    activityIndex === null ? null : ACTIVITY_IDS[activityIndex];
   const hasDestination = goal !== null && goal !== "maintenance";
   // Clamp the derived destination against the range of the ruler actually on
   // screen. The imperial weight ruler is 80-400 lb, which is not the metric
@@ -183,7 +226,10 @@ export default function Onboarding() {
     goal !== null && weightKg !== null
       ? deriveGoalWeightKg(goal, weightKg, weightRangeKg.min, weightRangeKg.max)
       : null;
-  const paces = useMemo(() => (weightKg === null ? [] : availablePaces(weightKg)), [weightKg]);
+  const paces = useMemo(
+    () => (weightKg === null ? [] : availablePaces(weightKg)),
+    [weightKg],
+  );
 
   // A dropping weight can shrink the pace list below the current index.
   // Derived at render time rather than corrected afterward in an effect: an
@@ -192,7 +238,8 @@ export default function Onboarding() {
   // `labels` array (accessibilityValue reading undefined). Deriving it here
   // means there is never a transient to correct, and there is exactly one
   // source of truth for "the pace stop actually in effect".
-  const safePaceIndex = paceIndex === null ? null : Math.min(paceIndex, paces.length - 1);
+  const safePaceIndex =
+    paceIndex === null ? null : Math.min(paceIndex, paces.length - 1);
   const paceKgPerWeek = safePaceIndex === null ? null : paces[safePaceIndex];
 
   const missing = [
@@ -203,8 +250,14 @@ export default function Onboarding() {
     weightKg === null && "weight",
     activityLevel === null && "activity",
     // Their rulers only render once weight gives the destination a rest value.
-    hasDestination && goalWeightRestKg !== null && chosenGoalWeightKg === null && "goal weight",
-    hasDestination && goalWeightRestKg !== null && paceKgPerWeek === null && "pace",
+    hasDestination &&
+      goalWeightRestKg !== null &&
+      chosenGoalWeightKg === null &&
+      "goal weight",
+    hasDestination &&
+      goalWeightRestKg !== null &&
+      paceKgPerWeek === null &&
+      "pace",
   ].filter((m): m is string => m !== false);
 
   // The full payload, or null until every required field is set. The
@@ -341,7 +394,10 @@ export default function Onboarding() {
     if (!input) return;
     setDetailsError(null);
     setGoalWeightErrorMsg(null);
-    const unitOpts = system === "imperial" ? { heightUnit: "in", weightUnit: "lb" } : undefined;
+    const unitOpts =
+      system === "imperial"
+        ? { heightUnit: "in", weightUnit: "lb" }
+        : undefined;
     // These are always real numbers straight off the rulers — never the empty
     // strings a text field could hand over — so this guard is a range check on
     // values the user can see, not a fill-in-the-blanks check. It stays
@@ -370,9 +426,15 @@ export default function Onboarding() {
     }
     const draftParams = draftToParams(input);
     if (isEdit) {
-      router.navigate({ pathname: "/plan", params: { ...draftParams, mode: "edit" } });
+      router.navigate({
+        pathname: "/plan",
+        params: { ...draftParams, mode: "edit" },
+      });
     } else {
-      router.push({ pathname: "/plan", params: { ...draftParams, mode: "onboarding" } });
+      router.push({
+        pathname: "/plan",
+        params: { ...draftParams, mode: "onboarding" },
+      });
     }
   }
 
@@ -429,7 +491,11 @@ export default function Onboarding() {
               >
                 kcal / day
               </AppText>
-              <PlanDelta kcal={plan.kcal} floored={plan.floored} revision={revision} />
+              <PlanDelta
+                kcal={plan.kcal}
+                floored={plan.floored}
+                revision={revision}
+              />
             </>
           ) : (
             // Plain language in the dial's place: no needle or numeral until
@@ -474,7 +540,11 @@ export default function Onboarding() {
       ) : null}
 
       <Overline style={{ marginTop: spacing.sm }}>You</Overline>
-      <SegmentedGlass options={SEX_OPTIONS} value={sex} onChange={onSexChange} />
+      <SegmentedGlass
+        options={SEX_OPTIONS}
+        value={sex}
+        onChange={onSexChange}
+      />
 
       <View style={{ gap: spacing.md }}>
         <View>
@@ -501,7 +571,9 @@ export default function Onboarding() {
           {system === "imperial" ? (
             <TickRuler
               mode="continuous"
-              value={heightCm === null ? null : Math.round(heightCm / CM_PER_IN)}
+              value={
+                heightCm === null ? null : Math.round(heightCm / CM_PER_IN)
+              }
               restValue={Math.round(HEIGHT_CM_REST / CM_PER_IN)}
               min={HEIGHT_IN_MIN}
               max={HEIGHT_IN_MAX}
@@ -600,7 +672,11 @@ export default function Onboarding() {
           {system === "imperial" ? (
             <TickRuler
               mode="continuous"
-              value={chosenGoalWeightKg === null ? null : Math.round(lbFromKg(chosenGoalWeightKg))}
+              value={
+                chosenGoalWeightKg === null
+                  ? null
+                  : Math.round(lbFromKg(chosenGoalWeightKg))
+              }
               restValue={Math.round(lbFromKg(goalWeightRestKg))}
               min={WEIGHT_LB_MIN}
               max={WEIGHT_LB_MAX}
@@ -654,7 +730,9 @@ export default function Onboarding() {
         <>
           <DerivationChain rows={derivationRows} />
 
-          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          <View
+            style={{ flexDirection: "row", justifyContent: "space-between" }}
+          >
             <View style={{ alignItems: "center" }}>
               <AppText variant="footnote" muted>
                 Protein
@@ -678,8 +756,8 @@ export default function Onboarding() {
       ) : null}
 
       <AppText variant="footnote" muted style={{ textAlign: "center" }}>
-        Kora gives general nutrition information, not medical advice. For medical concerns, talk to
-        a healthcare professional.
+        Kora gives general nutrition information, not medical advice. For
+        medical concerns, talk to a healthcare professional.
       </AppText>
     </AuthScaffold>
   );

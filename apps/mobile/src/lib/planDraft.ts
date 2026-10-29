@@ -11,7 +11,11 @@ const ACTIVITY_LEVELS: readonly PlanDraft["activity_level"][] = [
   "active",
   "very_active",
 ];
-const GOALS: readonly PlanDraft["goal"][] = ["fat_loss", "maintenance", "muscle_gain"];
+const GOALS: readonly PlanDraft["goal"][] = [
+  "fat_loss",
+  "maintenance",
+  "muscle_gain",
+];
 
 /** Route params are strings; absent and null fields are left out. */
 export function draftToParams(d: PlanDraft): Record<string, string> {
@@ -33,8 +37,13 @@ function num(p: Params, key: string): number | undefined {
   return Number.isFinite(n) ? n : NaN;
 }
 
-function oneOf<T extends string>(v: Params[string], allowed: readonly T[]): T | undefined {
-  return typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : undefined;
+function oneOf<T extends string>(
+  v: Params[string],
+  allowed: readonly T[],
+): T | undefined {
+  return typeof v === "string" && (allowed as readonly string[]).includes(v)
+    ? (v as T)
+    : undefined;
 }
 
 /**
