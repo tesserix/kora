@@ -1,6 +1,7 @@
 package onboarding
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -91,4 +92,36 @@ func TestEmpty(t *testing.T) {
 	require.True(t, (&ottoChange{}).empty())
 	g := "fat_loss"
 	require.False(t, (&ottoChange{Goal: &g}).empty())
+}
+
+func TestPlanChangesSkipsDestinationAcrossMaintenance(t *testing.T) {
+	fields := func(cs []PlanChange) []string {
+		var out []string
+		for _, c := range cs {
+			out = append(out, c.Field)
+		}
+		return out
+	}
+	fat := ottoDraft()
+	fatT, err := Calculate(fat, 2026)
+	require.NoError(t, err)
+	g := "maintenance"
+	maint := ottoChange{Goal: &g}.apply(fat)
+	maintT, err := Calculate(maint, 2026)
+	require.NoError(t, err)
+
+	for _, got := range [][]PlanChange{
+		planChanges(fat, maint, fatT, maintT),
+		planChanges(maint, fat, maintT, fatT),
+	} {
+		f := fields(got)
+		require.Contains(t, f, "goal")
+		require.NotContains(t, f, "goal_weight_kg")
+		require.NotContains(t, f, "pace_kg_per_week")
+	}
+}
+
+func TestOttoSystemPromptAsksForDestination(t *testing.T) {
+	require.True(t, strings.HasSuffix(ottoSystemPrompt,
+		"When changing the goal to fat_loss or muscle_gain, also include goal_weight_kg and pace_kg_per_week."))
 }

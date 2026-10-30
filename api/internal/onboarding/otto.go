@@ -46,7 +46,7 @@ type PlanChange struct {
 	To    any    `json:"to"`
 }
 
-const ottoSystemPrompt = `You are Otto, Kora's nutrition coach, helping a user adjust their daily plan. You receive JSON with the user's message, their current plan inputs, and the targets Kora calculated. Reply with JSON ONLY, no code fences, exactly matching: {"reply": string, "change": object|null}. "reply" is one to three short, warm sentences in plain language. "change" may contain only these keys: "activity_level" (sedentary|light|moderate|active|very_active), "goal" (fat_loss|maintenance|muscle_gain), "goal_weight_kg" (number), "pace_kg_per_week" (number), "kcal_override" (number), "protein_override_g" (number), "clear_kcal_override" (true), "clear_protein_override" (true). Set "change" to null when the message is a question or nothing should change. When the user gives a range from a professional, use its midpoint rounded to a whole number. Never suggest calories below the "bmr" value in the targets. Never give medical advice; suggest a healthcare professional for medical concerns. Kora checks every number you suggest and may refuse it.`
+const ottoSystemPrompt = `You are Otto, Kora's nutrition coach, helping a user adjust their daily plan. You receive JSON with the user's message, their current plan inputs, and the targets Kora calculated. Reply with JSON ONLY, no code fences, exactly matching: {"reply": string, "change": object|null}. "reply" is one to three short, warm sentences in plain language. "change" may contain only these keys: "activity_level" (sedentary|light|moderate|active|very_active), "goal" (fat_loss|maintenance|muscle_gain), "goal_weight_kg" (number), "pace_kg_per_week" (number), "kcal_override" (number), "protein_override_g" (number), "clear_kcal_override" (true), "clear_protein_override" (true). Set "change" to null when the message is a question or nothing should change. When the user gives a range from a professional, use its midpoint rounded to a whole number. Never suggest calories below the "bmr" value in the targets. Never give medical advice; suggest a healthcare professional for medical concerns. Kora checks every number you suggest and may refuse it. When changing the goal to fat_loss or muscle_gain, also include goal_weight_kg and pace_kg_per_week.`
 
 func parseOttoReply(raw string) (ottoReply, error) {
 	var r ottoReply
@@ -119,8 +119,11 @@ func planChanges(oldIn, newIn Input, oldT, newT Targets) []PlanChange {
 	}
 	str("activity_level", oldIn.ActivityLevel, newIn.ActivityLevel)
 	str("goal", oldIn.Goal, newIn.Goal)
-	num("goal_weight_kg", oldIn.GoalWeightKg, newIn.GoalWeightKg, round1)
-	num("pace_kg_per_week", oldIn.PaceKgPerWeek, newIn.PaceKgPerWeek, round1)
+	// Maintenance has no destination, so its zeros are not values to compare.
+	if oldIn.Goal != "maintenance" && newIn.Goal != "maintenance" {
+		num("goal_weight_kg", oldIn.GoalWeightKg, newIn.GoalWeightKg, round1)
+		num("pace_kg_per_week", oldIn.PaceKgPerWeek, newIn.PaceKgPerWeek, round1)
+	}
 	num("kcal", oldT.Kcal, newT.Kcal, round0)
 	num("protein_g", oldT.ProteinG, newT.ProteinG, round0)
 	num("carbs_g", oldT.CarbsG, newT.CarbsG, round0)
@@ -266,6 +269,8 @@ func (h Handler) Otto(c *gin.Context) {
 		return
 	}
 
+	// Any pace increase counts, even one that speeds up gain rather than
+	// loss: an at-risk user loses a harmless proposal, never gets a harmful one.
 	lowers := newT.Kcal < oldT.Kcal-ottoKcalTolerance ||
 		(newIn.Goal != "maintenance" && newIn.PaceKgPerWeek > draft.PaceKgPerWeek)
 	if atRisk && lowers {
@@ -295,5 +300,7 @@ func (h Handler) recordOtto(ctx context.Context, userID uuid.UUID, u ai.Usage, e
 	case err != nil:
 		u.Outcome = ai.OutcomeError
 	}
-	_ = h.meter.Record(ctx, userID, u, ai.EstimateCostUSD(u))
+	if err := h.meter.Record(ctx, userID, u, ai.EstimateCostUSD(u)); err != nil {
+		slog.WarnContext(ctx, "onboarding: otto metering failed", "err", err, "user_id", userID)
+	}
 }

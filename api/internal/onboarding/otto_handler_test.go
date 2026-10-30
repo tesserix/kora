@@ -1,9 +1,11 @@
 package onboarding
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -34,14 +36,15 @@ func (p *fakeOttoProvider) GenerateText(context.Context, string, string) (string
 func (p *fakeOttoProvider) Name() string { return "fake" }
 
 type fakeOttoMeter struct {
-	within  bool
-	records []ai.Usage
+	within    bool
+	records   []ai.Usage
+	recordErr error
 }
 
 func (m *fakeOttoMeter) WithinBudget(context.Context, uuid.UUID) (bool, error) { return m.within, nil }
 func (m *fakeOttoMeter) Record(_ context.Context, _ uuid.UUID, u ai.Usage, _ float64) error {
 	m.records = append(m.records, u)
-	return nil
+	return m.recordErr
 }
 
 type fakeSignals struct {
@@ -296,4 +299,18 @@ func TestOttoAtRiskRestrictiveProposalSuppressed(t *testing.T) {
 	require.Equal(t, atRiskReply, r.Data.Reply)
 	require.Nil(t, r.Data.Proposal)
 	require.True(t, r.Data.ShowSupport)
+}
+
+func TestOttoRecordFailureIsLoggedNotFatal(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	e := newOttoEnv(t, `{"reply":"Hi","change":null}`, fakeSignals{})
+	e.meter.recordErr = errors.New("meter down")
+	r := e.ask(t, ottoBody("hi", ""), http.StatusOK)
+	require.Equal(t, "Hi", r.Data.Reply)
+	require.Contains(t, logs.String(), "level=WARN")
+	require.Contains(t, logs.String(), "meter down")
 }
