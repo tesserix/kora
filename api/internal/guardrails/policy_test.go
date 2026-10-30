@@ -127,3 +127,30 @@ func TestRoutineOvernightFastingIsNotRisk(t *testing.T) {
 func TestNoDeclaredFastIsNotRisk(t *testing.T) {
 	require.False(t, AtRisk(Signals{DeclaredFastHours: 0}))
 }
+
+func TestLooksRestrictive(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"eat less", "You should try to eat less today.", true},
+		{"eaten enough", "You've eaten enough for today.", true},
+		{"had enough", "You've had enough already.", true},
+		{"stop eating", "Maybe stop eating for now.", true},
+		{"skip a meal", "You could skip a meal.", true},
+		{"skip meals", "You could try to skip meals sometimes.", true},
+		{"cut back", "Time to cut back on snacks.", true},
+		{"restrict", "Consider restricting your intake.", true},
+		{"too many calories", "That's too many calories today.", true},
+		{"go to bed hungry", "It's fine to go to bed hungry tonight.", true},
+		{"case-insensitive", "YOU SHOULD EAT LESS.", true},
+		{"supportive answer", "You have 55g protein to go — a yoghurt would help.", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, LooksRestrictive(tt.text))
+		})
+	}
+}

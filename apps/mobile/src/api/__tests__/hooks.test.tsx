@@ -67,6 +67,7 @@ import {
   useSavedMeals,
   useSendFriendRequest,
   usePlan,
+  usePlanOtto,
   useSavePlan,
   useSubmitOnboarding,
   useUnfriend,
@@ -1436,6 +1437,37 @@ test("useSavePlan PUTs the body, seeds the profile and invalidates the plan and 
   expect(client.getQueryData(["profile"])).toEqual(saved);
   expect(client.getQueryState(["plan"])?.isInvalidated).toBe(true);
   expect(client.getQueryState(["dashboard"])?.isInvalidated).toBe(true);
+});
+
+test("usePlanOtto POSTs the message and draft and invalidates nothing", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["profile"], { id: "u1" });
+  client.setQueryData(["plan"], { stale: false });
+  client.setQueryData(["dashboard"], { stale: false });
+  const reply = { reply: "Sure.", proposal: null, show_support: false };
+  (apiFetch as jest.Mock).mockResolvedValueOnce(reply);
+  const draft = {
+    sex: "male" as const,
+    birth_year: 1990,
+    height_cm: 180,
+    weight_kg: 78,
+    activity_level: "moderate" as const,
+    goal: "maintenance" as const,
+  };
+  const { result } = await renderHook(() => usePlanOtto(), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+  await expect(result.current.mutateAsync({ message: "less carbs", draft })).resolves.toEqual(reply);
+  expect(apiFetch).toHaveBeenCalledWith("/v1/me/plan/otto", {
+    method: "POST",
+    body: JSON.stringify({ message: "less carbs", draft }),
+  });
+  // The endpoint only proposes; nothing is saved, so nothing goes stale.
+  for (const key of ["profile", "plan", "dashboard"]) {
+    expect(client.getQueryState([key])?.isInvalidated).toBe(false);
+  }
 });
 
 // usePins/useSavedMeals are the only two read hooks with a nested food

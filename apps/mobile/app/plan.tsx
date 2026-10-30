@@ -15,6 +15,7 @@ import {
 } from "@/components/instrument/DerivationChain";
 import { engravedStyle, monoStyle } from "@/components/instrument/typography";
 import { GroupedSection, Row } from "@/components/GroupedList";
+import { PlanOtto } from "@/components/plan/PlanOtto";
 import { PressableScale, haptics } from "@/motion";
 import {
   usePlan,
@@ -184,6 +185,22 @@ export default function PlanScreen() {
     }
   }
 
+  function applyProposal(next: PlanDraft) {
+    setKcalText(undefined);
+    setProteinText(undefined);
+    setEditing(null);
+    // setParams merges, so a field the proposal cleared must be set to
+    // undefined; draftFromParams then reads it as absent.
+    router.setParams({
+      goal_weight_kg: undefined,
+      pace_kg_per_week: undefined,
+      target_kcal_override: undefined,
+      target_protein_override_g: undefined,
+      ...draftToParams(next),
+      mode: params.mode ?? "edit",
+    });
+  }
+
   function clearOverride(field: Field) {
     (field === "kcal" ? setKcalText : setProteinText)("");
     setEditing(null);
@@ -291,9 +308,13 @@ export default function PlanScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: instrument.bg }}>
       <AppBackground />
+      {/* iOS: insets the scroll so Otto's input, near the bottom, can sit
+          above the keyboard. Android's windowSoftInputMode already resizes. */}
       <ScrollView
+        testID="plan-scroll"
         style={{ flex: 1 }}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
         contentContainerStyle={{
           paddingTop: insets.top + 8,
           paddingBottom: insets.bottom + 40,
@@ -412,6 +433,8 @@ export default function PlanScreen() {
               </AppText>
             ) : null}
           </View>
+
+          <PlanOtto draft={payload} onUse={applyProposal} />
 
           {profile.error && profileUnknown ? (
             <View

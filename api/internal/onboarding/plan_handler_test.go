@@ -23,6 +23,7 @@ type planEnv struct {
 	r   *gin.Engine
 	db  *gorm.DB
 	uid uuid.UUID
+	mw  []gin.HandlerFunc
 }
 
 func newPlanEnv(t *testing.T) planEnv {
@@ -43,7 +44,7 @@ func newPlanEnv(t *testing.T) planEnv {
 	r.POST("/v1/onboarding", append(mw, h.Submit)...)
 	r.GET("/v1/me/plan", append(mw, h.GetPlan)...)
 	r.PUT("/v1/me/plan", append(mw, h.PutPlan)...)
-	return planEnv{r: r, db: db, uid: uid}
+	return planEnv{r: r, db: db, uid: uid, mw: mw}
 }
 
 func (e planEnv) do(t *testing.T, method, path, body string) *httptest.ResponseRecorder {

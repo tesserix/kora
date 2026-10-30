@@ -15,6 +15,13 @@
         "notes": "zod 3.x has no patched release; reached only through @expo/cli build tooling, not the shipped app.",
         "expiry": "2026-12-31"
       }
+    },
+    {
+      "GHSA-qr28-fpjm-wq7f": {
+        "active": true,
+        "notes": "decode-uri-component via expo-router > query-string 7. The only fix (0.5.1) is ESM-only and query-string 7 require()s it; expo-router 57.0.29 is the latest for SDK 57. Short expiry so this gets rechecked.",
+        "expiry": "2026-11-30"
+      }
     }
   ]
 }

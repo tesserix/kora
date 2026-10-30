@@ -3,7 +3,7 @@ package metrics
 import "testing"
 
 func TestNormalizeCallTypeKeepsKnownValues(t *testing.T) {
-	for _, ct := range []string{"identify_photo", "identify_text", "transcribe", "coach", "decompose", "embed", "parse_recipe_text", "parse_recipe_photo"} {
+	for _, ct := range []string{"identify_photo", "identify_text", "transcribe", "coach", "decompose", "embed", "parse_recipe_text", "parse_recipe_photo", "plan_otto"} {
 		if got := normalizeCallType(ct); got != ct {
 			t.Errorf("normalizeCallType(%q) = %q, want %q", ct, got, ct)
 		}
@@ -20,7 +20,7 @@ func TestNormalizeCallTypeBucketsUnknownValues(t *testing.T) {
 }
 
 func TestClassForSplitsResolutionFromDerived(t *testing.T) {
-	resolution := []string{"identify_photo", "identify_text", "transcribe", "coach", "parse_recipe_text", "parse_recipe_photo"}
+	resolution := []string{"identify_photo", "identify_text", "transcribe", "coach", "parse_recipe_text", "parse_recipe_photo", "plan_otto"}
 	derived := []string{"decompose", "embed"}
 	for _, ct := range resolution {
 		if got := classFor(ct); got != "resolution" {

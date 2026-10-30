@@ -5,6 +5,8 @@
 // responsibility of the consumer (coach/insights).
 package guardrails
 
+import "strings"
+
 // Risk thresholds for the Protective posture. Any one of these firing is
 // treated as an ED-risk signal.
 const (
@@ -164,6 +166,39 @@ func AtRisk(s Signals) bool {
 	}
 	if s.DeclaredFastHours >= riskDeclaredFastHours {
 		return true
+	}
+	return false
+}
+
+// restrictivePhrases are lowercase substrings that mark a Q&A answer as
+// steering the user toward eating less / stopping — the same category the
+// system prompt already asks the provider to avoid. LooksRestrictive checks
+// the raw provider answer against this list so Evaluate is
+// actually able to Soften/Suppress restrictive answer text instead of always
+// receiving Restrictive: false.
+var restrictivePhrases = []string{
+	"eat less",
+	"eaten enough",
+	"you've had enough",
+	"stop eating",
+	"skip a meal",
+	"skip meals",
+	"cut back",
+	"restrict",
+	"too many calories",
+	"go to bed hungry",
+}
+
+// LooksRestrictive reports whether text contains any restrictivePhrases,
+// case-insensitively. It is a pure heuristic over the raw provider answer —
+// no signals, no side effects — used to gate the answer through the
+// Protective guardrails policy for real.
+func LooksRestrictive(text string) bool {
+	lower := strings.ToLower(text)
+	for _, phrase := range restrictivePhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
 	}
 	return false
 }

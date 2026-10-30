@@ -83,6 +83,7 @@ import type {
   MyHandle,
   ShareCategory,
   OnboardingInput,
+  PlanOttoResponse,
   PlanResponse,
   LogRecipeResult,
   PinnedFood,
@@ -301,6 +302,18 @@ export function useSavePlan(): UseMutationResult<Profile, Error, OnboardingInput
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       return qc.invalidateQueries({ queryKey: ["plan"] });
     },
+  });
+}
+
+// No onSuccess: Otto only proposes, so nothing cached goes stale.
+export function usePlanOtto(): UseMutationResult<
+  PlanOttoResponse,
+  Error,
+  { message: string; draft: OnboardingInput }
+> {
+  return useMutation({
+    mutationFn: (body: { message: string; draft: OnboardingInput }) =>
+      apiFetch("/v1/me/plan/otto", { method: "POST", body: JSON.stringify(body) }) as Promise<PlanOttoResponse>,
   });
 }
 

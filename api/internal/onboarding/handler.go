@@ -11,6 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/tesserix/kora/api/internal/ai"
+	"github.com/tesserix/kora/api/internal/guardrails"
 	"github.com/tesserix/kora/api/internal/httpx"
 	"github.com/tesserix/kora/api/internal/localday"
 	"github.com/tesserix/kora/api/internal/tracking"
@@ -33,14 +35,32 @@ type WeightRecorder interface {
 // needs to be constant across the process so the derived ID is stable.
 var onboardingWeighInNamespace = uuid.MustParse("6a2f9c3e-6b8b-4e0a-9b8a-2f2f6a2b9c31")
 
+// SignalsSource loads the Protective policy's signals. Declared here rather
+// than importing coach, which the router wires in.
+type SignalsSource interface {
+	SignalsFor(ctx context.Context, userID uuid.UUID, loc *time.Location) (guardrails.Signals, error)
+}
+
 type Handler struct {
 	users   user.Repository
 	weights WeightRecorder
 	now     func() time.Time
+
+	// Otto's collaborators; a nil provider makes Otto answer 503.
+	provider ai.Provider
+	meter    ai.Meter
+	signals  SignalsSource
 }
 
 func NewHandler(users user.Repository, weights WeightRecorder) Handler {
 	return Handler{users: users, weights: weights, now: time.Now}
+}
+
+// WithOtto enables POST /v1/me/plan/otto. The meter is required: every
+// provider call is billed against the user's AI budget.
+func (h Handler) WithOtto(p ai.Provider, m ai.Meter, s SignalsSource) Handler {
+	h.provider, h.meter, h.signals = p, m, s
+	return h
 }
 
 func (h Handler) Submit(c *gin.Context) {
