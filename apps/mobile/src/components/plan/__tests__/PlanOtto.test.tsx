@@ -141,3 +141,22 @@ test("support card when show_support", async () => {
   await answer({ reply: "I'll keep your calories where they are for now.", proposal: null, show_support: true });
   expect(screen.getByText("A little extra support")).toBeTruthy();
 });
+
+test("an edit after the answer withdraws the proposal", async () => {
+  await render(<PlanOtto draft={DRAFT} onUse={onUse} />);
+  await ask();
+  await answer(PROPOSAL);
+  expect(screen.getByText("Use this")).toBeTruthy();
+  await screen.rerender(<PlanOtto draft={{ ...DRAFT, weight_kg: 71 }} onUse={onUse} />);
+  expect(screen.queryByText("Use this")).toBeNull();
+  expect(screen.queryByText("146 → 125 g")).toBeNull();
+  expect(screen.getByText("Here's a version with less carbs.")).toBeTruthy();
+});
+
+test("sending a new message withdraws the previous proposal", async () => {
+  await render(<PlanOtto draft={DRAFT} onUse={onUse} />);
+  await ask();
+  await answer(PROPOSAL);
+  await ask("more protein");
+  expect(screen.queryByText("Use this")).toBeNull();
+});

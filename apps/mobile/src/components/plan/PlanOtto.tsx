@@ -55,6 +55,9 @@ type Exchange = {
   reply: string;
   proposal: PlanOttoProposal | null;
   showSupport: boolean;
+  // The draft the proposal was built from; applying it to any other draft
+  // would silently undo the user's later edits.
+  basis: string;
 };
 
 // Same round-trip plan.tsx gives server data: nulls become absent, and
@@ -97,8 +100,10 @@ export function PlanOtto({
   function send() {
     const message = input.trim();
     if (!message || otto.isPending) return;
+    const basis = JSON.stringify(draft);
     setPending(message);
     setError(null);
+    setOffered(false);
     otto.mutate(
       { message, draft },
       {
@@ -111,6 +116,7 @@ export function PlanOtto({
               reply: res.reply,
               proposal: valid ? res.proposal : null,
               showSupport: res.show_support,
+              basis,
             },
           ]);
           setOffered(!!valid);
@@ -131,6 +137,7 @@ export function PlanOtto({
   }
 
   const last = exchanges.length - 1;
+  const current = JSON.stringify(draft);
   const textButton = {
     minHeight: 44,
     justifyContent: "center",
@@ -149,7 +156,7 @@ export function PlanOtto({
           <Bubble role="user" text={x.you} />
           <Bubble role="otto" text={x.reply} />
           {x.showSupport ? <SupportCard /> : null}
-          {i === last && offered && x.proposal ? (
+          {i === last && offered && x.proposal && x.basis === current ? (
             <View
               style={{
                 marginBottom: 12,
