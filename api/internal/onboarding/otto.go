@@ -238,12 +238,21 @@ func (h Handler) Otto(c *gin.Context) {
 	}
 	// Every answer carries show_support, as coach chat does, so a text-only
 	// reply to an at-risk user still points them at support.
-	atRisk := true
-	if s, serr := h.signals.SignalsFor(ctx, userID, user.LocFromContext(c)); serr != nil {
+	signals, serr := h.signals.SignalsFor(ctx, userID, user.LocFromContext(c))
+	if serr != nil {
 		slog.WarnContext(ctx, "onboarding: otto signals failed; treating as at risk", "err", serr, "user_id", userID)
-	} else {
-		atRisk = guardrails.AtRisk(s)
+		// Any value AtRisk accepts, so Evaluate fails closed too.
+		signals = guardrails.Signals{RecentDeficitPct: 1}
 	}
+	atRisk := guardrails.AtRisk(signals)
+	// The model's prose reaches the user, so it passes the same text gate as
+	// coach answers.
+	decision := guardrails.Evaluate(guardrails.Nudge{Text: reply.Reply, Restrictive: guardrails.LooksRestrictive(reply.Reply)}, signals)
+	if decision.Action == guardrails.Suppress {
+		httpx.OK(c, ottoResponse{Reply: ottoAtRiskReply, ShowSupport: true})
+		return
+	}
+	reply.Reply = decision.Text
 	if reply.Change.empty() {
 		httpx.OK(c, ottoResponse{Reply: reply.Reply, ShowSupport: atRisk})
 		return

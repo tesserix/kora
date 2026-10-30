@@ -66,43 +66,10 @@ const emptyQuestionMessage = "question is required"
 // must never fall back to returning empty text here.
 const suppressedAnswerMessage = "Let's focus on what you're doing well. If food feels stressful, it can help to talk to someone you trust."
 
-// restrictivePhrases are lowercase substrings that mark a Q&A answer as
-// steering the user toward eating less / stopping — the same category the
-// system prompt already asks the provider to avoid. looksRestrictive checks
-// the raw provider answer against this list so guardrails.Evaluate is
-// actually able to Soften/Suppress restrictive answer text instead of always
-// receiving Restrictive: false.
-var restrictivePhrases = []string{
-	"eat less",
-	"eaten enough",
-	"you've had enough",
-	"stop eating",
-	"skip a meal",
-	"skip meals",
-	"cut back",
-	"restrict",
-	"too many calories",
-	"go to bed hungry",
-}
-
 var (
 	citationMarkerPattern = regexp.MustCompile(`(?i)\[cite:([a-z0-9_]{1,64})\]`)
 	citationLikePattern   = regexp.MustCompile(`(?i)\[cite:[^\]\r\n]{0,128}\]`)
 )
-
-// looksRestrictive reports whether text contains any restrictivePhrases,
-// case-insensitively. It is a pure heuristic over the raw provider answer —
-// no signals, no side effects — used to gate the answer through the
-// Protective guardrails policy for real.
-func looksRestrictive(text string) bool {
-	lower := strings.ToLower(text)
-	for _, phrase := range restrictivePhrases {
-		if strings.Contains(lower, phrase) {
-			return true
-		}
-	}
-	return false
-}
 
 // Answer is the Q&A result: the guardrail-gated text, the grounding facts it
 // can be checked against, and whether a supportive resource should also be
@@ -314,7 +281,7 @@ func (s *Service) Ask(ctx context.Context, userID uuid.UUID, now time.Time, loc 
 	}
 	raw = screened
 
-	restrictive := looksRestrictive(raw)
+	restrictive := guardrails.LooksRestrictive(raw)
 	decision := guardrails.Evaluate(guardrails.Nudge{Text: raw, Restrictive: restrictive}, signals)
 
 	text := decision.Text
@@ -560,7 +527,7 @@ func regateStoredTurns(turns []StoredTurn, signals guardrails.Signals) []StoredT
 			continue
 		}
 
-		restrictive := looksRestrictive(t.Text)
+		restrictive := guardrails.LooksRestrictive(t.Text)
 		decision := guardrails.Evaluate(guardrails.Nudge{Text: t.Text, Restrictive: restrictive}, signals)
 
 		text := decision.Text

@@ -265,3 +265,35 @@ func TestOttoNotOnboarded(t *testing.T) {
 	r := e.ask(t, ottoBody("hi", ""), http.StatusOK)
 	require.Equal(t, "Hi", r.Data.Reply)
 }
+
+func TestOttoAtRiskRestrictiveTextSuppressed(t *testing.T) {
+	e := newOttoEnv(t, `{"reply":"You should eat less","change":null}`, fakeSignals{signals: atRiskSignals})
+	r := e.ask(t, ottoBody("what should I do?", ""), http.StatusOK)
+	require.Equal(t, atRiskReply, r.Data.Reply)
+	require.Nil(t, r.Data.Proposal)
+	require.True(t, r.Data.ShowSupport)
+}
+
+func TestOttoRestrictiveTextSoftened(t *testing.T) {
+	e := newOttoEnv(t, `{"reply":"You should eat less","change":null}`, fakeSignals{})
+	r := e.ask(t, ottoBody("what should I do?", ""), http.StatusOK)
+	require.Equal(t, "Nice work today — you're on track.", r.Data.Reply)
+	require.Nil(t, r.Data.Proposal)
+	require.False(t, r.Data.ShowSupport)
+}
+
+func TestOttoSignalsErrorRestrictiveTextSuppressed(t *testing.T) {
+	e := newOttoEnv(t, `{"reply":"You should eat less","change":null}`, fakeSignals{err: errors.New("db down")})
+	r := e.ask(t, ottoBody("what should I do?", ""), http.StatusOK)
+	require.Equal(t, atRiskReply, r.Data.Reply)
+	require.Nil(t, r.Data.Proposal)
+	require.True(t, r.Data.ShowSupport)
+}
+
+func TestOttoAtRiskRestrictiveProposalSuppressed(t *testing.T) {
+	e := newOttoEnv(t, `{"reply":"Cut back on snacks and add protein","change":{"protein_override_g":125}}`, fakeSignals{signals: atRiskSignals})
+	r := e.ask(t, ottoBody("more protein", ""), http.StatusOK)
+	require.Equal(t, atRiskReply, r.Data.Reply)
+	require.Nil(t, r.Data.Proposal)
+	require.True(t, r.Data.ShowSupport)
+}
